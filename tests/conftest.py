@@ -14,6 +14,12 @@ import pytest
 
 from app import config, schemas
 
+# Tests must stay hermetic regardless of the developer's local .env: force the
+# Databricks dual-write mirror off so `store.save_*` calls throughout this
+# suite never attempt real network calls or write test data into a real
+# workspace, even if DATABRICKS_ENABLED=true is set for the running app.
+config.DATABRICKS_ENABLED = False
+
 
 # --------------------------------------------------------------------------- #
 # fake LLM

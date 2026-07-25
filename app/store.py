@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from . import config
+from . import databricks_store
 
 _SLUG = re.compile(r"[^a-z0-9]+")
 
@@ -189,7 +190,9 @@ def save_character(series_id: str, character: dict) -> Path:
     """One JSON per character; the narrator is always narrator.json."""
     name = character.get("name", "")
     key = "narrator" if character.get("is_narrator") else slug(name)
-    return write_json(characters_dir(series_id) / f"{key}.json", character)
+    path = write_json(characters_dir(series_id) / f"{key}.json", character)
+    databricks_store.sync_character(series_id, key, character)
+    return path
 
 
 def load_characters(series_id: str) -> list[dict]:
@@ -240,19 +243,27 @@ def load_voice_cast(series_id: str) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 def save_episode_outline(series_id: str, outline: dict) -> Path:
     num = int(outline.get("number", 0))
-    return write_json(episode_dir(series_id, num) / "outline.json", outline)
+    path = write_json(episode_dir(series_id, num) / "outline.json", outline)
+    databricks_store.sync_episode_outline(series_id, num, outline)
+    return path
 
 
 def save_episode_script(series_id: str, number: int, lines: list[dict]) -> Path:
-    return write_json(episode_dir(series_id, number) / "script.json", lines)
+    path = write_json(episode_dir(series_id, number) / "script.json", lines)
+    databricks_store.sync_episode_script(series_id, number, lines)
+    return path
 
 
 def save_episode_sound_plan(series_id: str, number: int, plan: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+    path = write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+    databricks_store.sync_episode_sound_plan(series_id, number, plan)
+    return path
 
 
 def save_episode_audio(series_id: str, number: int, manifest: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "audio.json", manifest)
+    path = write_json(episode_dir(series_id, number) / "audio.json", manifest)
+    databricks_store.sync_episode_audio(series_id, number, manifest)
+    return path
 
 
 def load_episode(series_id: str, number: int) -> dict[str, Any]:
@@ -333,6 +344,7 @@ def save_index(series_id: str, **fields: Any) -> dict:
     card["updated_at"] = _now()
     card.setdefault("created_at", card["updated_at"])
     write_json(path, card)
+    databricks_store.sync_series(card)
     return card
 
 
