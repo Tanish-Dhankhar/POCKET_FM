@@ -1,0 +1,9 @@
+﻿.venv/
+__pycache__/
+*.pyc
+.env
+output/
+.antigravity/
+.claude/
+emotion_test.wav
+output.wav

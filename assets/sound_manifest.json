@@ -1,0 +1,184 @@
+{
+  "music": {
+    "romantic": {
+      "file": "music/romantic.wav",
+      "loopable": true,
+      "keywords": [
+        "love",
+        "tender",
+        "warm"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "emotional": {
+      "file": "music/emotional.wav",
+      "loopable": true,
+      "keywords": [
+        "sad",
+        "reflective",
+        "soft"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "hopeful": {
+      "file": "music/hopeful.wav",
+      "loopable": true,
+      "keywords": [
+        "uplifting",
+        "bright"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "tense": {
+      "file": "music/tense.wav",
+      "loopable": true,
+      "keywords": [
+        "suspense",
+        "anxious"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "horror": {
+      "file": "music/horror.wav",
+      "loopable": true,
+      "keywords": [
+        "scary",
+        "dread",
+        "creepy"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "mystery": {
+      "file": "music/mystery.wav",
+      "loopable": true,
+      "keywords": [
+        "intrigue",
+        "noir"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "action": {
+      "file": "music/action.wav",
+      "loopable": true,
+      "keywords": [
+        "battle",
+        "chase",
+        "fight"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "ambient": {
+      "file": "music/ambient.wav",
+      "loopable": true,
+      "keywords": [
+        "calm",
+        "neutral",
+        "background"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    }
+  },
+  "sfx": {
+    "thunder": {
+      "file": "sfx/thunder.wav",
+      "keywords": [
+        "lightning",
+        "storm"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "rain": {
+      "file": "sfx/rain.wav",
+      "keywords": [
+        "rainfall",
+        "drizzle"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "wind": {
+      "file": "sfx/wind.wav",
+      "keywords": [
+        "breeze",
+        "gale"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "footsteps": {
+      "file": "sfx/footsteps.wav",
+      "keywords": [
+        "walking",
+        "steps"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "door_creak": {
+      "file": "sfx/door_creak.wav",
+      "keywords": [
+        "door",
+        "hinge",
+        "open"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "birds": {
+      "file": "sfx/birds.wav",
+      "keywords": [
+        "forest",
+        "nature",
+        "morning"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "heartbeat": {
+      "file": "sfx/heartbeat.wav",
+      "keywords": [
+        "pulse",
+        "fear",
+        "tension"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "clock_tick": {
+      "file": "sfx/clock_tick.wav",
+      "keywords": [
+        "deadline",
+        "time"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "sword_clash": {
+      "file": "sfx/sword_clash.wav",
+      "keywords": [
+        "battle",
+        "fight",
+        "metal"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "glass_break": {
+      "file": "sfx/glass_break.wav",
+      "keywords": [
+        "shatter",
+        "crash"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "crowd": {
+      "file": "sfx/crowd.wav",
+      "keywords": [
+        "market",
+        "people",
+        "festival"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    },
+    "phone_ring": {
+      "file": "sfx/phone_ring.wav",
+      "keywords": [
+        "call",
+        "ringtone"
+      ],
+      "license": "PLACEHOLDER-synth (replace with CC0)"
+    }
+  }
+}
