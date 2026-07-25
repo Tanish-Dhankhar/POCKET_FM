@@ -9,3 +9,8 @@ audioop-lts>=0.2.1 ; python_version >= "3.13"
 python-dotenv>=1.0.0
 requests>=2.31.0
 python-multipart>=0.0.9
+
+# Optional Databricks dual-write mirror (app/databricks_store.py). Only used
+# when DATABRICKS_ENABLED=true in .env; safe to leave installed but unused.
+databricks-sdk>=0.40.0
+databricks-sql-connector[pyarrow]>=4.0.0

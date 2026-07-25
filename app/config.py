@@ -26,6 +26,25 @@ CORS_ORIGINS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Databricks (optional dual-write mirror — see app/databricks_store.py)
+# ---------------------------------------------------------------------------
+# Off by default. Local disk (app/store.py) is always the source of truth;
+# turning this on only adds a best-effort mirrored copy in Delta + a Unity
+# Catalog Volume. Leaving it off (or misconfigured) is 100% safe — nothing
+# here is imported or contacted unless every required var is also set.
+DATABRICKS_ENABLED = os.environ.get("DATABRICKS_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes",
+)
+DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST", "")
+DATABRICKS_CLIENT_ID = os.environ.get("DATABRICKS_CLIENT_ID", "")
+DATABRICKS_CLIENT_SECRET = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+DATABRICKS_SERVER_HOSTNAME = os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")
+DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH", "")
+DATABRICKS_CATALOG = os.environ.get("DATABRICKS_CATALOG", "pocketfm_dev")
+DATABRICKS_SCHEMA = os.environ.get("DATABRICKS_SCHEMA", "studio")
+DATABRICKS_VOLUME = os.environ.get("DATABRICKS_VOLUME", "audio")
+
+# ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
 TEXT_MODEL = "gemini-3.1-flash-lite"
