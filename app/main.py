@@ -11,15 +11,31 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from . import config
+from . import config, store
+from .api_store import router as store_router
 from .graph import GRAPH
 from .state import new_state
 
 app = FastAPI(title="AI Creator Copilot", version="0.1.0")
+
+# The React frontend runs on its own dev-server origin, so the browser sends a
+# preflight before every POST. Without this the whole API is unreachable from it.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Store-backed routes (/studio/*): the frontend reads and writes the series
+# folder through these, independently of the pipeline's in-memory state.
+app.include_router(store_router)
 
 
 # --------------------------------------------------------------------------- #
@@ -27,6 +43,8 @@ app = FastAPI(title="AI Creator Copilot", version="0.1.0")
 # --------------------------------------------------------------------------- #
 class NewSeries(BaseModel):
     idea: str
+    title: str | None = None
+    transcript: str | None = None   # set when the idea came from a recording
 
 
 class Command_(BaseModel):
@@ -65,10 +83,17 @@ def _run(series_id: str, inp: Any) -> dict:
 
 
 def _snapshot(series_id: str) -> dict:
+    """In-memory graph state, falling back to the folder on disk.
+
+    The checkpointer is in-process, so after a restart the graph knows nothing —
+    but the series folder still does. Hydrating from disk keeps reads working.
+    """
     snap = GRAPH.get_state(_cfg(series_id))
-    if not snap.values:
-        raise HTTPException(404, f"unknown series {series_id}")
-    return snap.values
+    if snap.values:
+        return snap.values
+    if store.series_dir(series_id).exists():
+        return store.hydrate(series_id)
+    raise HTTPException(404, f"unknown series {series_id}")
 
 
 # --------------------------------------------------------------------------- #
@@ -77,6 +102,11 @@ def _snapshot(series_id: str) -> dict:
 @app.post("/series")
 def create_series(body: NewSeries) -> dict:
     series_id = uuid.uuid4().hex[:12]
+    # Seed the folder before the first LLM call so the series exists on disk
+    # even if generation fails partway.
+    store.save_idea(series_id, body.idea, transcript=body.transcript)
+    store.save_index(series_id, title=body.title or "", stage="extract",
+                     source="audio" if body.transcript else "text")
     return _run(series_id, new_state(series_id, body.idea))
 
 
@@ -96,6 +126,18 @@ def get_state(series_id: str) -> dict:
 
 def _resume(series_id: str, cmd: Command_) -> dict:
     _snapshot(series_id)  # 404 if unknown
+    # Creator-supplied data arrives with the command rather than from a node, so
+    # persist the pieces the folder owns before handing back to the graph.
+    data = cmd.data or {}
+    if "clarification_answers" in data:
+        store.save_clarification_answers(series_id, data["clarification_answers"])
+    if "voice_cast" in data:
+        store.save_voice_cast(series_id, data["voice_cast"])
+    for ep in data.get("episodes", []) or []:
+        store.save_episode_outline(series_id, ep)
+    for num, lines in (data.get("scripts") or {}).items():
+        store.save_episode_script(series_id, int(num), lines)
+
     payload = {"action": cmd.action, "note": cmd.note, "data": cmd.data}
     return _run(series_id, Command(resume=payload))
 

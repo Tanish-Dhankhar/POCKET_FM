@@ -19,6 +19,12 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Origins allowed to call the API from a browser. Comma-separated override via
+# CORS_ORIGINS; "*" allows any origin (fine for local dev / a hackathon demo).
+CORS_ORIGINS = [
+    o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()
+]
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------

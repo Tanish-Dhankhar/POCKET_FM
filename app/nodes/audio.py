@@ -6,12 +6,12 @@ picks sparse cues against it; gen_mix realises them; gen_deliver snapshots state
 """
 from __future__ import annotations
 
-import json
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
 
-from .. import assets, audio_engine, config, prompts, schemas
+from .. import assets, audio_engine, config, prompts, schemas, store
 from ..llm import generate_structured
 from ..tts import render_line
 from ..state import SeriesState
@@ -21,7 +21,7 @@ _SAFE = re.compile(r"[^A-Za-z0-9]+")
 
 
 def _ep_dir(state: SeriesState, num: int) -> Path:
-    return config.OUTPUT_DIR / state["series_id"] / f"ep{int(num):02d}"
+    return store.episode_dir(state["series_id"], num)
 
 
 def _voice_for(state: SeriesState, speaker: str) -> str:
@@ -30,43 +30,60 @@ def _voice_for(state: SeriesState, speaker: str) -> str:
         return cast[speaker]
     if speaker.lower() == "narrator":
         return cast.get("Narrator", _DEFAULT_NARRATOR_VOICE)
-    # deterministic fallback so an uncast character still gets a stable voice
-    idx = abs(hash(speaker)) % len(config.VOICE_NAMES)
-    return config.VOICE_NAMES[idx]
+    # Deterministic fallback so an uncast character keeps the same voice across
+    # episodes and server restarts. Uses a content hash, not builtin hash(),
+    # which is randomly salted per process (PYTHONHASHSEED).
+    digest = hashlib.sha256(speaker.encode("utf-8")).hexdigest()
+    return config.VOICE_NAMES[int(digest, 16) % len(config.VOICE_NAMES)]
 
 
 # --------------------------------------------------------------------------- #
 # Stage 8 — Audio generation (TTS per line, concatenated)
 # --------------------------------------------------------------------------- #
+def render_episode_audio(state: SeriesState, number: int,
+                         progress=None) -> dict[str, Any]:
+    """TTS every line of ONE episode, stitch it, and persist audio.json.
+
+    `progress(done, total)` is called after each line so a job runner can report
+    real progress (TTS is the slow part — often rate-limited to ~3 lines/minute).
+    """
+    sid = state["series_id"]
+    lines = state.get("scripts", {}).get(str(number), [])
+    if not lines:
+        raise ValueError(f"episode {number} has no script yet")
+
+    cache_dir = store.series_dir(sid) / "tts_cache"
+    ldir = store.lines_dir(sid, number)
+    speakable = [(i, ln) for i, ln in enumerate(lines) if (ln.get("text") or "").strip()]
+
+    line_files: list[str] = []
+    for done, (i, ln) in enumerate(speakable, start=1):
+        voice = _voice_for(state, ln.get("speaker", "Narrator"))
+        safe = _SAFE.sub("_", ln.get("speaker", "x"))[:20]
+        out = ldir / f"{i:04d}_{safe}.wav"
+        render_line(ln["text"].strip(), voice, out, cache_dir=cache_dir)
+        line_files.append(str(out))
+        if progress:
+            progress(done, len(speakable))
+
+    track, offsets = audio_engine.concat_lines(line_files)
+    voices_path = _ep_dir(state, number) / f"ep{int(number):02d}_voices.wav"
+    audio_engine.export(track, voices_path)
+
+    manifest = {
+        "voices": str(voices_path),
+        "offsets": offsets,
+        "total_ms": len(track),
+        "line_files": line_files,
+    }
+    store.save_episode_audio(sid, number, manifest)
+    return manifest
+
+
 def gen_audio(state: SeriesState) -> dict[str, Any]:
     manifest: dict[str, Any] = dict(state.get("audio_manifest", {}))
-    cache_dir = config.OUTPUT_DIR / state["series_id"] / "tts_cache"
-
-    for num, lines in state.get("scripts", {}).items():
-        ep_dir = _ep_dir(state, int(num))
-        lines_dir = ep_dir / "lines"
-        line_files: list[str] = []
-        for i, ln in enumerate(lines):
-            text = (ln.get("text") or "").strip()
-            if not text:
-                continue
-            voice = _voice_for(state, ln.get("speaker", "Narrator"))
-            safe = _SAFE.sub("_", ln.get("speaker", "x"))[:20]
-            out = lines_dir / f"{i:04d}_{safe}.wav"
-            render_line(text, voice, out, cache_dir=cache_dir)
-            line_files.append(str(out))
-
-        if not line_files:
-            continue
-        track, offsets = audio_engine.concat_lines(line_files)
-        voices_path = ep_dir / f"ep{int(num):02d}_voices.wav"
-        audio_engine.export(track, voices_path)
-        manifest[str(num)] = {
-            "voices": str(voices_path),
-            "offsets": offsets,
-            "total_ms": len(track),
-            "line_files": line_files,
-        }
+    for num in state.get("scripts", {}):
+        manifest[str(num)] = render_episode_audio(state, int(num))
     return {"audio_manifest": manifest, "stage": "audio"}
 
 
@@ -118,54 +135,77 @@ def _enforce(plan: schemas.SoundPlan, offsets: list[int], total_ms: int
     return {"music": kept_music, "sfx": kept_sfx}
 
 
+def design_episode_sound(state: SeriesState, number: int) -> dict[str, Any]:
+    """Pick + persist sparse sound cues for ONE episode."""
+    lines = state.get("scripts", {}).get(str(number), [])
+    info = state.get("audio_manifest", {}).get(str(number)) or \
+        store.load_episode(state["series_id"], number)["audio"]
+    if not lines or not info:
+        raise ValueError(f"episode {number} needs a script and rendered audio first")
+    raw = generate_structured(
+        prompts.sound_design(lines, assets.music_moods(), assets.sfx_keys(),
+                            state.get("feedback", "")),
+        schemas.SoundPlan, thinking=config.THINK_LOW, system=prompts.SYSTEM,
+    )
+    plan = _enforce(raw, info["offsets"], info["total_ms"])
+    store.save_episode_sound_plan(state["series_id"], number, plan)
+    return plan
+
+
 def gen_sound_design(state: SeriesState) -> dict[str, Any]:
     plans: dict[str, Any] = dict(state.get("sound_plans", {}))
     audio_manifest = state.get("audio_manifest", {})
-    for num, lines in state.get("scripts", {}).items():
-        info = audio_manifest.get(str(num))
-        if not info:
-            continue
-        raw = generate_structured(
-            prompts.sound_design(lines, assets.music_moods(), assets.sfx_keys(),
-                                state.get("feedback", "")),
-            schemas.SoundPlan, thinking=config.THINK_LOW, system=prompts.SYSTEM,
-        )
-        plans[str(num)] = _enforce(raw, info["offsets"], info["total_ms"])
+    for num in state.get("scripts", {}):
+        if audio_manifest.get(str(num)):
+            plans[str(num)] = design_episode_sound(state, int(num))
     return {"sound_plans": plans, "stage": "sound_design"}
 
 
 # --------------------------------------------------------------------------- #
 # Stage 9b — Mix (realise the sound plan over the voice timeline)
 # --------------------------------------------------------------------------- #
+def mix_episode(state: SeriesState, number: int) -> dict[str, Any]:
+    """Overlay music + SFX for ONE episode and persist the final wav."""
+    sid = state["series_id"]
+    info = dict(state.get("audio_manifest", {}).get(str(number))
+                or store.load_episode(sid, number)["audio"])
+    if not info.get("voices"):
+        raise ValueError(f"episode {number} has no rendered voices yet")
+
+    track = audio_engine.load(info["voices"])
+    plan = (state.get("sound_plans", {}).get(str(number))
+            or store.load_episode(sid, number)["sound_plan"]
+            or {"music": [], "sfx": []})
+
+    for cue in plan.get("music", []):
+        path = assets.music_path(cue["mood"])
+        if path and path.exists():
+            track = audio_engine.place_music(track, path, cue["start_ms"], cue["end_ms"])
+    for cue in plan.get("sfx", []):
+        path = assets.sfx_path(cue["name"])
+        if path and path.exists():
+            track = audio_engine.place_sfx(track, path, cue["at_ms"])
+
+    final = _ep_dir(state, number) / f"ep{int(number):02d}_final.wav"
+    audio_engine.export(track, final)
+    info["final"] = str(final)
+    store.save_episode_audio(sid, number, info)
+    return info
+
+
 def gen_mix(state: SeriesState) -> dict[str, Any]:
     manifest: dict[str, Any] = dict(state.get("audio_manifest", {}))
     for num, info in list(manifest.items()):
-        if "voices" not in info:
-            continue
-        track = audio_engine.load(info["voices"])
-        plan = state.get("sound_plans", {}).get(str(num), {"music": [], "sfx": []})
-
-        for cue in plan.get("music", []):
-            path = assets.music_path(cue["mood"])
-            if path and path.exists():
-                track = audio_engine.place_music(track, path, cue["start_ms"], cue["end_ms"])
-        for cue in plan.get("sfx", []):
-            path = assets.sfx_path(cue["name"])
-            if path and path.exists():
-                track = audio_engine.place_sfx(track, path, cue["at_ms"])
-
-        final = _ep_dir(state, int(num)) / f"ep{int(num):02d}_final.wav"
-        audio_engine.export(track, final)
-        info["final"] = str(final)
-        manifest[str(num)] = info
+        if info.get("voices"):
+            manifest[str(num)] = mix_episode(state, int(num))
     return {"audio_manifest": manifest, "stage": "mix"}
 
 
 # --------------------------------------------------------------------------- #
-# Deliver — snapshot the full series state to disk
+# Deliver — snapshot the index card
 # --------------------------------------------------------------------------- #
 def gen_deliver(state: SeriesState) -> dict[str, Any]:
-    out = config.OUTPUT_DIR / state["series_id"]
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "series.json").write_text(json.dumps(state, indent=2, default=str))
+    store.save_index(state["series_id"], stage="deliver",
+                     ep_count=state.get("ep_count"),
+                     ep_minutes=state.get("ep_minutes"))
     return {"stage": "deliver"}

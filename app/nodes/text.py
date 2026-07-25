@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import prompts, schemas
+from .. import prompts, schemas, store
 from ..llm import generate_structured
 from ..config import THINK_HIGH, THINK_LOW
 from ..state import SeriesState
@@ -43,16 +43,25 @@ def _recap_before(state: SeriesState, number: int) -> str:
 # Stage 1 — Extract
 # --------------------------------------------------------------------------- #
 def gen_extract(state: SeriesState) -> dict[str, Any]:
+    sid = state["series_id"]
+    store.save_idea(sid, state["idea"])
     res = generate_structured(
         prompts.extract(state["idea"], state.get("feedback", "")),
         schemas.ExtractResult, thinking=THINK_HIGH, system=prompts.SYSTEM,
     )
-    return {
+    out = {
         "genre": res.genre, "theme": res.theme, "tone": res.tone,
         "language": res.language, "setting": res.setting, "logline": res.logline,
         "characters": [c.model_dump() for c in res.characters],
         "stage": "extract",
     }
+    # Persist the extracted metadata immediately so the folder is authoritative.
+    store.save_blueprint(sid, {"logline": res.logline, "theme": res.theme,
+                               "tone": res.tone, "characters": out["characters"]},
+                         meta=out)
+    store.save_index(sid, title=state.get("title") or res.logline[:60],
+                     genre=res.genre, stage="extract")
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -63,7 +72,9 @@ def gen_clarify(state: SeriesState) -> dict[str, Any]:
         prompts.clarify(state["idea"], _extracted(state), state.get("feedback", "")),
         schemas.ClarifyResult, thinking=THINK_HIGH, system=prompts.SYSTEM,
     )
-    return {"clarification": res.model_dump(), "stage": "clarify"}
+    clarification = res.model_dump()
+    store.save_clarification(state["series_id"], clarification)
+    return {"clarification": clarification, "stage": "clarify"}
 
 
 # --------------------------------------------------------------------------- #
@@ -78,10 +89,16 @@ def gen_blueprint(state: SeriesState) -> dict[str, Any]:
         ),
         schemas.Blueprint, thinking=THINK_HIGH, system=prompts.SYSTEM,
     )
+    sid = state["series_id"]
+    characters = [c.model_dump() for c in bp.characters]
+    # Answers may have arrived with the approve command — persist them too.
+    store.save_clarification_answers(sid, state.get("clarification_answers", []))
+    store.save_blueprint(sid, bp.model_dump(), meta=_extracted(state))
+    store.save_index(sid, stage="blueprint", arcs=state.get("arcs", []))
     return {
         "blueprint": bp.model_dump(),
         # blueprint is now the authoritative character source
-        "characters": [c.model_dump() for c in bp.characters],
+        "characters": characters,
         "stage": "blueprint",
     }
 
@@ -113,8 +130,14 @@ def gen_episode_plan(state: SeriesState) -> dict[str, Any]:
                              state.get("feedback", "")),
         schemas.EpisodePlan, thinking=THINK_HIGH, system=prompts.SYSTEM,
     )
+    sid = state["series_id"]
+    episodes = [e.model_dump() for e in plan.episodes]
+    # One folder per episode, each with its own outline.json.
+    for ep in episodes:
+        store.save_episode_outline(sid, ep)
+    store.save_index(sid, stage="episode_plan", ep_count=ep_count, ep_minutes=ep_minutes)
     return {
-        "episodes": [e.model_dump() for e in plan.episodes],
+        "episodes": episodes,
         "ep_count": ep_count, "ep_minutes": ep_minutes,
         "stage": "episode_plan",
     }
@@ -124,6 +147,7 @@ def gen_episode_plan(state: SeriesState) -> dict[str, Any]:
 # Stage 6 — Scripts (all episodes)
 # --------------------------------------------------------------------------- #
 def gen_script(state: SeriesState) -> dict[str, Any]:
+    sid = state["series_id"]
     scripts: dict[str, list[dict[str, Any]]] = dict(state.get("scripts", {}))
     for ep in state.get("episodes", []):
         num = ep["number"]
@@ -132,8 +156,29 @@ def gen_script(state: SeriesState) -> dict[str, Any]:
                           state.get("feedback", "")),
             schemas.EpisodeScript, thinking=THINK_HIGH, system=prompts.SYSTEM,
         )
-        scripts[str(num)] = [ln.model_dump() for ln in sc.lines]
+        lines = [ln.model_dump() for ln in sc.lines]
+        scripts[str(num)] = lines
+        store.save_episode_script(sid, num, lines)
+    store.save_index(sid, stage="script")
     return {"scripts": scripts, "stage": "script"}
+
+
+# --------------------------------------------------------------------------- #
+# Single-episode script (used by the per-episode generate endpoint)
+# --------------------------------------------------------------------------- #
+def gen_script_for_episode(state: SeriesState, number: int) -> list[dict[str, Any]]:
+    """Generate + persist the script for ONE episode, and return its lines."""
+    ep = next((e for e in state.get("episodes", []) if e.get("number") == number), None)
+    if ep is None:
+        raise ValueError(f"episode {number} is not in the plan")
+    sc = generate_structured(
+        prompts.script(state["blueprint"], ep, _recap_before(state, number),
+                      state.get("feedback", "")),
+        schemas.EpisodeScript, thinking=THINK_HIGH, system=prompts.SYSTEM,
+    )
+    lines = [ln.model_dump() for ln in sc.lines]
+    store.save_episode_script(state["series_id"], number, lines)
+    return lines
 
 
 # --------------------------------------------------------------------------- #
@@ -146,4 +191,7 @@ def gen_voice_cast(state: SeriesState) -> dict[str, Any]:
     )
     cast = {a.character: a.voice_id for a in sug.assignments}
     reasons = {a.character: a.reason for a in sug.assignments}
+    # Voice choice is stored on each character file so per-character edits persist.
+    store.save_voice_cast(state["series_id"], cast)
+    store.save_index(state["series_id"], stage="voice_cast")
     return {"voice_cast": cast, "ui": {"voice_reasons": reasons}, "stage": "voice_cast"}

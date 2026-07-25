@@ -1,0 +1,400 @@
+"""File-based project store — the source of truth for a series.
+
+Layout (everything the frontend reads/writes lives here):
+
+    output/<series_id>/
+    ├── series.json                  # index card: title, genre, stage, counts
+    ├── input/
+    │   ├── idea.txt                 # the creator's original story text
+    │   ├── transcript.txt           # verbatim transcript when input was audio
+    │   ├── source.wav               # the raw recording, if any
+    │   ├── clarification.json       # the questions that were asked
+    │   └── clarification_answers.json
+    ├── blueprint/
+    │   ├── plot.json                # logline, story_world, main_storyline
+    │   ├── theme.json
+    │   ├── genre.json               # genre, tone, setting, language
+    │   └── characters/
+    │       ├── narrator.json        # only when a narrator is used
+    │       └── <character-slug>.json
+    └── episodes/
+        └── ep01/
+            ├── outline.json         # title, summary, events, emotion, cliffhanger
+            ├── script.json          # ordered ScriptLine list
+            ├── sound_plan.json      # music + sfx cues
+            ├── audio.json           # manifest: offsets, durations, file paths
+            ├── lines/               # per-line rendered wavs
+            ├── ep01_voices.wav
+            └── ep01_final.wav
+
+Design notes:
+- Writes are atomic (temp file + replace) so a crash can't leave half a JSON.
+- Every reader tolerates a missing file and returns a sensible empty value, so a
+  partially-built series still loads in the UI.
+- `hydrate()` rebuilds pipeline state from disk, which is what makes the folder —
+  not the in-process checkpointer — the real source of truth.
+"""
+from __future__ import annotations
+
+import json
+import re
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from . import config
+
+_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+# --------------------------------------------------------------------------- #
+# paths
+# --------------------------------------------------------------------------- #
+def slug(name: str) -> str:
+    """Filesystem-safe key for a character name ('Dr. Ravi Menon' -> 'dr-ravi-menon')."""
+    return _SLUG.sub("-", (name or "").strip().lower()).strip("-") or "unnamed"
+
+
+def series_dir(series_id: str) -> Path:
+    return config.OUTPUT_DIR / series_id
+
+
+def input_dir(series_id: str) -> Path:
+    return series_dir(series_id) / "input"
+
+
+def blueprint_dir(series_id: str) -> Path:
+    return series_dir(series_id) / "blueprint"
+
+
+def characters_dir(series_id: str) -> Path:
+    return blueprint_dir(series_id) / "characters"
+
+
+def episodes_dir(series_id: str) -> Path:
+    return series_dir(series_id) / "episodes"
+
+
+def episode_dir(series_id: str, number: int) -> Path:
+    return episodes_dir(series_id) / f"ep{int(number):02d}"
+
+
+def lines_dir(series_id: str, number: int) -> Path:
+    return episode_dir(series_id, number) / "lines"
+
+
+# --------------------------------------------------------------------------- #
+# primitive read / write
+# --------------------------------------------------------------------------- #
+def write_json(path: Path, data: Any) -> Path:
+    """Atomically write JSON (temp file + replace)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str),
+                   encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def read_json(path: Path, default: Any = None) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return default
+
+
+def write_text(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text or "", encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def read_text(path: Path, default: str = "") -> str:
+    return path.read_text(encoding="utf-8") if path.exists() else default
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# --------------------------------------------------------------------------- #
+# input/
+# --------------------------------------------------------------------------- #
+def save_idea(series_id: str, idea: str, *, transcript: str | None = None) -> None:
+    write_text(input_dir(series_id) / "idea.txt", idea)
+    if transcript is not None:
+        write_text(input_dir(series_id) / "transcript.txt", transcript)
+
+
+def save_source_audio(series_id: str, data: bytes, filename: str = "source.wav") -> Path:
+    path = input_dir(series_id) / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def save_clarification(series_id: str, clarification: dict) -> None:
+    write_json(input_dir(series_id) / "clarification.json", clarification)
+
+
+def save_clarification_answers(series_id: str, answers: list[dict]) -> None:
+    write_json(input_dir(series_id) / "clarification_answers.json", answers)
+
+
+def load_input(series_id: str) -> dict[str, Any]:
+    d = input_dir(series_id)
+    return {
+        "idea": read_text(d / "idea.txt"),
+        "transcript": read_text(d / "transcript.txt"),
+        "clarification": read_json(d / "clarification.json", {}) or {},
+        "clarification_answers": read_json(d / "clarification_answers.json", []) or [],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# blueprint/  (plot, theme, genre, characters/)
+# --------------------------------------------------------------------------- #
+def save_blueprint(series_id: str, blueprint: dict, *, meta: dict | None = None) -> None:
+    """Split the blueprint into plot.json / theme.json / genre.json + characters/."""
+    meta = meta or {}
+    bp = blueprint or {}
+
+    write_json(blueprint_dir(series_id) / "plot.json", {
+        "logline": bp.get("logline", meta.get("logline", "")),
+        "story_world": bp.get("story_world", ""),
+        "main_storyline": bp.get("main_storyline", ""),
+    })
+    write_json(blueprint_dir(series_id) / "theme.json", {
+        "theme": bp.get("theme", meta.get("theme", "")),
+        "tone": bp.get("tone", meta.get("tone", "")),
+    })
+    write_json(blueprint_dir(series_id) / "genre.json", {
+        "genre": meta.get("genre", ""),
+        "setting": meta.get("setting", ""),
+        "language": meta.get("language", config.DEFAULT_LANGUAGE),
+        "tone": bp.get("tone", meta.get("tone", "")),
+    })
+
+    for ch in bp.get("characters", []) or []:
+        save_character(series_id, ch)
+
+
+def save_character(series_id: str, character: dict) -> Path:
+    """One JSON per character; the narrator is always narrator.json."""
+    name = character.get("name", "")
+    key = "narrator" if character.get("is_narrator") else slug(name)
+    return write_json(characters_dir(series_id) / f"{key}.json", character)
+
+
+def load_characters(series_id: str) -> list[dict]:
+    d = characters_dir(series_id)
+    if not d.exists():
+        return []
+    # narrator first, then alphabetical — stable order for the UI
+    files = sorted(d.glob("*.json"), key=lambda p: (p.stem != "narrator", p.stem))
+    return [c for c in (read_json(f) for f in files) if c]
+
+
+def load_blueprint(series_id: str) -> dict[str, Any]:
+    d = blueprint_dir(series_id)
+    plot = read_json(d / "plot.json", {}) or {}
+    theme = read_json(d / "theme.json", {}) or {}
+    genre = read_json(d / "genre.json", {}) or {}
+    return {
+        "logline": plot.get("logline", ""),
+        "story_world": plot.get("story_world", ""),
+        "main_storyline": plot.get("main_storyline", ""),
+        "theme": theme.get("theme", ""),
+        "tone": theme.get("tone", genre.get("tone", "")),
+        "genre": genre.get("genre", ""),
+        "setting": genre.get("setting", ""),
+        "language": genre.get("language", ""),
+        "characters": load_characters(series_id),
+    }
+
+
+def save_voice_cast(series_id: str, voice_cast: dict[str, str]) -> None:
+    """Voice choice lives on each character file, so edits survive independently."""
+    for ch in load_characters(series_id):
+        name = ch.get("name", "")
+        voice = voice_cast.get(name)
+        if voice and ch.get("voice_id") != voice:
+            ch["voice_id"] = voice
+            save_character(series_id, ch)
+
+
+def load_voice_cast(series_id: str) -> dict[str, str]:
+    return {c["name"]: c["voice_id"]
+            for c in load_characters(series_id)
+            if c.get("name") and c.get("voice_id")}
+
+
+# --------------------------------------------------------------------------- #
+# episodes/
+# --------------------------------------------------------------------------- #
+def save_episode_outline(series_id: str, outline: dict) -> Path:
+    num = int(outline.get("number", 0))
+    return write_json(episode_dir(series_id, num) / "outline.json", outline)
+
+
+def save_episode_script(series_id: str, number: int, lines: list[dict]) -> Path:
+    return write_json(episode_dir(series_id, number) / "script.json", lines)
+
+
+def save_episode_sound_plan(series_id: str, number: int, plan: dict) -> Path:
+    return write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+
+
+def save_episode_audio(series_id: str, number: int, manifest: dict) -> Path:
+    return write_json(episode_dir(series_id, number) / "audio.json", manifest)
+
+
+def load_episode(series_id: str, number: int) -> dict[str, Any]:
+    d = episode_dir(series_id, number)
+    return {
+        "number": number,
+        "outline": read_json(d / "outline.json", {}) or {},
+        "script": read_json(d / "script.json", []) or [],
+        "sound_plan": read_json(d / "sound_plan.json", {}) or {},
+        "audio": read_json(d / "audio.json", {}) or {},
+    }
+
+
+def episode_numbers(series_id: str) -> list[int]:
+    d = episodes_dir(series_id)
+    if not d.exists():
+        return []
+    nums = []
+    for p in d.iterdir():
+        if p.is_dir() and p.name.startswith("ep") and p.name[2:].isdigit():
+            nums.append(int(p.name[2:]))
+    return sorted(nums)
+
+
+def load_outlines(series_id: str) -> list[dict]:
+    return [o for o in (read_json(episode_dir(series_id, n) / "outline.json")
+                        for n in episode_numbers(series_id)) if o]
+
+
+def load_scripts(series_id: str) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for n in episode_numbers(series_id):
+        lines = read_json(episode_dir(series_id, n) / "script.json", []) or []
+        if lines:
+            out[str(n)] = lines
+    return out
+
+
+def load_sound_plans(series_id: str) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for n in episode_numbers(series_id):
+        plan = read_json(episode_dir(series_id, n) / "sound_plan.json")
+        if plan:
+            out[str(n)] = plan
+    return out
+
+
+def load_audio_manifest(series_id: str) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for n in episode_numbers(series_id):
+        info = read_json(episode_dir(series_id, n) / "audio.json")
+        if info:
+            out[str(n)] = info
+    return out
+
+
+def episode_status(series_id: str, number: int) -> str:
+    """planned -> scripted -> voiced -> ready (what the UI shows on each row)."""
+    d = episode_dir(series_id, number)
+    audio = read_json(d / "audio.json", {}) or {}
+    if audio.get("final") and Path(audio["final"]).exists():
+        return "ready"
+    if audio.get("voices"):
+        return "voiced"
+    if (d / "script.json").exists():
+        return "scripted"
+    return "planned"
+
+
+# --------------------------------------------------------------------------- #
+# series.json index card + listing
+# --------------------------------------------------------------------------- #
+def save_index(series_id: str, **fields: Any) -> dict:
+    path = series_dir(series_id) / "series.json"
+    card = read_json(path, {}) or {}
+    card.update({k: v for k, v in fields.items() if v is not None})
+    card["series_id"] = series_id
+    card["updated_at"] = _now()
+    card.setdefault("created_at", card["updated_at"])
+    write_json(path, card)
+    return card
+
+
+def load_index(series_id: str) -> dict:
+    card = read_json(series_dir(series_id) / "series.json", {}) or {}
+    nums = episode_numbers(series_id)
+    card["episode_count"] = len(nums)
+    card["generated_count"] = sum(
+        1 for n in nums if episode_status(series_id, n) == "ready"
+    )
+    return card
+
+
+def list_series() -> list[dict]:
+    if not config.OUTPUT_DIR.exists():
+        return []
+    cards = []
+    for d in config.OUTPUT_DIR.iterdir():
+        if d.is_dir() and (d / "series.json").exists():
+            cards.append(load_index(d.name))
+    return sorted(cards, key=lambda c: c.get("updated_at", ""), reverse=True)
+
+
+def delete_series(series_id: str) -> bool:
+    d = series_dir(series_id)
+    if not d.exists():
+        return False
+    shutil.rmtree(d)
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# hydrate: disk -> pipeline state
+# --------------------------------------------------------------------------- #
+def hydrate(series_id: str) -> dict[str, Any]:
+    """Rebuild pipeline state from the folder, so the disk is the source of truth."""
+    card = load_index(series_id)
+    inp = load_input(series_id)
+    bp = load_blueprint(series_id)
+
+    return {
+        "series_id": series_id,
+        "idea": inp["idea"],
+        "title": card.get("title", ""),
+        "include_narrator": card.get("include_narrator"),
+        "genre": bp["genre"], "theme": bp["theme"], "tone": bp["tone"],
+        "language": bp["language"], "setting": bp["setting"],
+        "logline": bp["logline"],
+        "characters": bp["characters"],
+        "clarification": inp["clarification"],
+        "clarification_answers": inp["clarification_answers"],
+        "blueprint": {
+            "logline": bp["logline"], "story_world": bp["story_world"],
+            "main_storyline": bp["main_storyline"], "tone": bp["tone"],
+            "theme": bp["theme"], "characters": bp["characters"],
+        },
+        "episodes": load_outlines(series_id),
+        "scripts": load_scripts(series_id),
+        "voice_cast": load_voice_cast(series_id),
+        "sound_plans": load_sound_plans(series_id),
+        "audio_manifest": load_audio_manifest(series_id),
+        "arcs": card.get("arcs", []),
+        "ep_count": card.get("ep_count", 0),
+        "ep_minutes": card.get("ep_minutes", 0),
+        "stage": card.get("stage", ""),
+    }

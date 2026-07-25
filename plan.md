@@ -16,19 +16,19 @@ A collaborative copilot that takes **one detailed story idea in plain text** and
 
 This is the exact pipeline the app implements. Each stage has an approve / edit / regenerate gate.
 
-| #  | Stage                        | What happens                                                                                                                                                                                                                                                | Creator control                              |
-| -- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| 0  | **Idea Input**         | Creator pastes the**entire story idea in detail** as plain text. That's the only required input.                                                                                                                                                      | —                                           |
-| 1  | **Extract & Confirm**  | LLM reads the idea and**extracts** genre, theme, tone, language, setting, and a first pass at the **characters it detected in the story** (count + who they are is inferred from the idea, not fixed). Shown back for confirmation.             | Change any field / confirm                   |
-| 2  | **Clarify**            | If anything is unclear/missing, LLM asks**up to 5 questions**, each with multiple-choice options **and** a free-text box (or both).                                                                                                             | Answer via options or text                   |
-| 3  | **Series Blueprint**   | LLM writes the**overall plot / story world / main storyline**, plus **character descriptions & relationships** (the character set comes from the idea + clarifications), tone, and theme.                                                       | Edit any section / regenerate part / approve |
-| 4  | **Episode Config**     | LLM**recommends an episode count** based on the depth/scope of the story, and the creator sets the final **number of episodes** + **average episode length (5–15 min)**.                                                                 | Accept recommendation or override            |
-| 5  | **Episode Plan**       | LLM divides the story into episodes — per episode: title, summary, main events,**emotional focus**, and an **ending cliffhanger**.                                                                                                             | Edit summaries / reorder / repace / approve  |
-| 6  | **Script Generation**  | LLM writes the full**dialogue for each character + narrator** (narrator only if the story needs one). **Emotion tags are added only on lines where the emotion genuinely shifts** — most lines carry no tag and are read in the voice's natural delivery.                                                                                             | Edit any line / regenerate / approve         |
-| 7  | **Voice Casting**      | Creator assigns a**distinct Gemini voice to each character** (and the narrator). LLM suggests a fit per character.                                                                                                                                    | Choose / change any voice                    |
-| 8  | **Audio Generation**   | TTS renders each line in the assigned voice (with emotion only where tagged); per-character clips are stitched into the episode with natural pauses.                                                                                                                                                | Preview / re-render a line                   |
-| 9  | **Sound Design & Mix** | LLM picks**sparse, subtle background music & SFX** from a prebuilt CC0 library and places them only where they add something (romantic scene → soft romantic bed; lightning → thunder SFX). **Many stretches stay dialogue-only or silent** so sound never feels wall-to-wall. Mixed low under the voices.                                                                       | Preview / change / remove any cue            |
-| ↺ | **Continue the Story** | Creator writes a**new plot in plain text**; the same pipeline runs — clarify if needed, **update the general story, update/add characters if mentioned**, and generate **new episodes** using the *same theme* and full prior context. | Full control again                           |
+| #  | Stage                        | What happens                                                                                                                                                                                                                                                                                                             | Creator control                              |
+| -- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| 0  | **Idea Input**         | Creator pastes the**entire story idea in detail** as plain text. That's the only required input.                                                                                                                                                                                                                   | —                                           |
+| 1  | **Extract & Confirm**  | LLM reads the idea and**extracts** genre, theme, tone, language, setting, and a first pass at the **characters it detected in the story** (count + who they are is inferred from the idea, not fixed). Shown back for confirmation.                                                                          | Change any field / confirm                   |
+| 2  | **Clarify**            | If anything is unclear/missing, LLM asks**up to 5 questions**, each with multiple-choice options **and** a free-text box (or both).                                                                                                                                                                          | Answer via options or text                   |
+| 3  | **Series Blueprint**   | LLM writes the**overall plot / story world / main storyline**, plus **character descriptions & relationships** (the character set comes from the idea + clarifications), tone, and theme.                                                                                                                    | Edit any section / regenerate part / approve |
+| 4  | **Episode Config**     | LLM**recommends an episode count** based on the depth/scope of the story, and the creator sets the final **number of episodes** + **average episode length (5–15 min)**.                                                                                                                              | Accept recommendation or override            |
+| 5  | **Episode Plan**       | LLM divides the story into episodes — per episode: title, summary, main events,**emotional focus**, and an **ending cliffhanger**.                                                                                                                                                                          | Edit summaries / reorder / repace / approve  |
+| 6  | **Script Generation**  | LLM writes the full**dialogue for each character + narrator** (narrator only if the story needs one). **Emotion tags are added only on lines where the emotion genuinely shifts** — most lines carry no tag and are read in the voice's natural delivery.                                                   | Edit any line / regenerate / approve         |
+| 7  | **Voice Casting**      | Creator assigns a**distinct Gemini voice to each character** (and the narrator). LLM suggests a fit per character.                                                                                                                                                                                                 | Choose / change any voice                    |
+| 8  | **Audio Generation**   | TTS renders each line in the assigned voice (with emotion only where tagged); per-character clips are stitched into the episode with natural pauses.                                                                                                                                                                     | Preview / re-render a line                   |
+| 9  | **Sound Design & Mix** | LLM picks**sparse, subtle background music & SFX** from a prebuilt CC0 library and places them only where they add something (romantic scene → soft romantic bed; lightning → thunder SFX). **Many stretches stay dialogue-only or silent** so sound never feels wall-to-wall. Mixed low under the voices. | Preview / change / remove any cue            |
+| ↺ | **Continue the Story** | Creator writes a**new plot in plain text**; the same pipeline runs — clarify if needed, **update the general story, update/add characters if mentioned**, and generate **new episodes** using the *same theme* and full prior context.                                                              | Full control again                           |
 
 **Key correction vs. a fixed cast:** there is **no preset number of characters**. The character list and count are *inferred from the initial story idea* in Stage 1, refined in clarification (Stage 2), and finalized in the blueprint (Stage 3). Continuation can add new characters when the new plot introduces them.
 
@@ -106,15 +106,48 @@ POCKET_FM/
 │   │   ├── thunder.wav rain.wav footsteps.wav door.wav birds.wav ...
 │   └── sound_manifest.json    # mood/keyword → file mapping + metadata
 └── output/
-    └── <series_id>/
-        ├── series.json         # snapshot of persisted state
-        ├── ep01/
-        │   ├── script.json
-        │   ├── lines/          # per-line rendered wavs
-        │   ├── ep01_voices.wav # stitched dialogue+narration
-        │   └── ep01_final.wav  # + music + SFX
-        └── ...
+    └── <series_id>/                 # THE source of truth (see §4a)
+        ├── series.json              # index card: title, genre, stage, counts
+        ├── input/
+        │   ├── idea.txt             # the creator's original story text
+        │   ├── transcript.txt       # verbatim transcript when input was audio
+        │   ├── source.wav           # the raw recording, if any
+        │   ├── clarification.json   # the questions that were asked
+        │   └── clarification_answers.json
+        ├── blueprint/
+        │   ├── plot.json            # logline, story_world, main_storyline
+        │   ├── theme.json           # theme, tone
+        │   ├── genre.json           # genre, setting, language
+        │   └── characters/
+        │       ├── narrator.json    # only when a narrator is used
+        │       └── <slug>.json      # one file per character (+ voice_id)
+        ├── episodes/
+        │   └── ep01/
+        │       ├── outline.json     # title, summary, events, emotion, cliffhanger
+        │       ├── script.json      # ordered ScriptLine list
+        │       ├── sound_plan.json  # music + sfx cues
+        │       ├── audio.json       # offsets, durations, file paths
+        │       ├── lines/           # per-line rendered wavs
+        │       ├── ep01_voices.wav  # stitched dialogue+narration
+        │       └── ep01_final.wav   # + music + SFX
+        └── tts_cache/               # content-hashed clips, shared across episodes
 ```
+
+### 4a. The folder is the source of truth
+
+`app/store.py` owns this layout, and **every node writes its artifacts as it produces
+them** — not just at the end. That gives us three things the in-process checkpointer
+cannot:
+
+- **Survives restarts.** `store.hydrate(series_id)` rebuilds pipeline state from the
+  folder, so `GET /series/{id}/state` still works after the server is restarted.
+- **Independently editable.** The frontend patches a single character or script file
+  without touching the rest of the pipeline. Voice choice lives *on the character file*,
+  so it persists per character rather than as one blob.
+- **Inspectable.** Every artifact is readable JSON on disk.
+
+Writes are atomic (temp file + `replace`) and every reader tolerates a missing file, so a
+half-built series still loads in the UI.
 
 ---
 
