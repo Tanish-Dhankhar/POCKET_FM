@@ -28,7 +28,7 @@ ALLOWED_EDIT_KEYS = {
     "genre", "theme", "tone", "language", "setting", "logline", "characters",
     "clarification", "clarification_answers", "blueprint",
     "recommended_ep_count", "ep_count", "ep_minutes", "episodes",
-    "scripts", "voice_cast", "sound_plans",
+    "scripts", "voice_cast", "sound_plans", "include_narrator",
 }
 
 # Stages that are automatic (no human gate) — audio/mix just produce artifacts.
@@ -82,10 +82,6 @@ def _make_review(stage: str, next_node: str):
     gen_node = f"gen_{stage}"
 
     def review(state: SeriesState) -> Command:
-        # Clarify auto-skips when the model asked nothing.
-        if stage == "clarify" and not state.get("clarification", {}).get("questions"):
-            return Command(goto=next_node, update={"feedback": ""})
-
         cmd = interrupt({"stage": stage, "payload": _payload(stage, state)}) or {}
         action = cmd.get("action", "approve")
 

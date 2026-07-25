@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Load .env from the project root (one level above this file's package).
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
@@ -102,3 +102,8 @@ EMOTION_TAGS = [
 ]
 
 DEFAULT_LANGUAGE = "English"
+
+# Clarification: always exactly this many questions, each with options and one
+# option flagged `recommended`. Fixed (not "up to N") so the wizard can render a
+# deterministic N-step flow.
+CLARIFY_QUESTION_COUNT = 4

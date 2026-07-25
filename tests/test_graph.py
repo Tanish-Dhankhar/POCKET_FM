@@ -84,11 +84,13 @@ def test_pipeline_visits_every_reviewable_stage_in_order(graph, offline):
     assert res["stage"] == "deliver"
 
 
-def test_clarify_auto_skips_when_no_questions(graph, offline):
-    offline["llm"].clarify_questions = 0
-    _, seen = _drive(graph, "s3", stop_at="blueprint", commands={})
-    assert "clarify" not in seen, "an empty question list must not gate the creator"
-    assert seen == ["extract", "blueprint"]
+def test_clarify_always_gates_with_four_questions(graph, offline):
+    res, seen = _drive(graph, "s3", stop_at="clarify", commands={})
+    assert seen == ["extract", "clarify"]
+    payload = res["__interrupt__"][0].value["payload"]
+    assert len(payload["questions"]) == 4
+    assert all(sum(bool(o["recommended"]) for o in q["options"]) == 1
+               for q in payload["questions"])
 
 
 def test_regenerate_reruns_generation_with_the_note(graph, offline):
@@ -215,11 +217,16 @@ def test_e2e_sound_plan_survives_enforcement(finished):
 
 def test_e2e_writes_series_json_snapshot(finished):
     res, out = finished
-    snapshot = out / "e2e" / "series.json"
+    root = out / "e2e"
+    snapshot = root / "series.json"
     assert snapshot.exists()
     data = json.loads(snapshot.read_text())
     assert data["series_id"] == "e2e"
-    assert data["blueprint"] and data["scripts"] and data["voice_cast"]
+    # series.json is intentionally a lightweight dashboard index. The durable
+    # source artifacts live in their own files so the frontend can patch them.
+    assert (root / "blueprint" / "plot.json").exists()
+    assert (root / "blueprint" / "characters").is_dir()
+    assert (root / "episodes" / "ep01" / "script.json").exists()
 
 
 def test_e2e_every_speaker_got_a_valid_voice(finished, offline):

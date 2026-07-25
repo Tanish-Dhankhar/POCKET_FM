@@ -10,6 +10,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .config import CLARIFY_QUESTION_COUNT
+
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Extract & Confirm
@@ -33,25 +35,51 @@ class ExtractResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — Clarification (max 5 questions)
+# Stage 2 — Clarification (ALWAYS exactly 4 questions, each with options)
 # ---------------------------------------------------------------------------
 class ClarifyOption(BaseModel):
-    label: str = Field(description="short option label, e.g. 'A. Born Different'")
-    detail: str = Field(description="1-2 sentence explanation of this option")
+    label: str = Field(description="the choice itself, a short concrete phrase")
+    detail: str = Field(description="one line on what picking this would mean for the story")
+    recommended: bool = Field(
+        default=False,
+        description="exactly ONE option per question must be true — the strongest choice",
+    )
 
 
 class ClarifyQuestion(BaseModel):
-    question: str
+    question: str = Field(
+        description="specific to THIS story — name its characters, setting, premise"
+    )
     options: list[ClarifyOption] = Field(
-        default_factory=list,
-        description="multiple-choice options; may be empty for a pure free-text question",
+        min_length=2, max_length=4,
+        description="3-4 meaningfully different creative directions",
     )
     allow_free_text: bool = True
 
 
 class ClarifyResult(BaseModel):
     questions: list[ClarifyQuestion] = Field(
-        description="0 to 5 questions; return an empty list if nothing is unclear"
+        min_length=CLARIFY_QUESTION_COUNT, max_length=CLARIFY_QUESTION_COUNT,
+        description=f"exactly {CLARIFY_QUESTION_COUNT} questions",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Confirm card — one cheap call so the wizard can show a title + recommended
+# episode count BEFORE the blueprint exists (ep_config only runs after it).
+# ---------------------------------------------------------------------------
+class ConfirmCard(BaseModel):
+    title: str = Field(description="a short, evocative series title — 2-5 words, no quotes")
+    genre: str
+    setting: str = Field(description="time period + place, in a few words")
+    narrator_suggested: bool = Field(
+        description="true if this story genuinely benefits from a narrator voice"
+    )
+    recommended_ep_count: int = Field(
+        ge=1, le=30, description="focused first season, typically 6-12"
+    )
+    recommended_ep_minutes: int = Field(
+        ge=5, le=15, description="average episode length in minutes"
     )
 
 
@@ -61,6 +89,7 @@ class ClarifyResult(BaseModel):
 class CharacterProfile(BaseModel):
     name: str
     role: str
+    gender: str = Field(default="Unspecified", description="gender identity or presentation")
     description: str
     personality: str = Field(description="core traits driving their behaviour")
     relationships: list[str] = Field(

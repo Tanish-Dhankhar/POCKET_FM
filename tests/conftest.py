@@ -69,12 +69,13 @@ class FakeLLM:
     def _ClarifyResult(self, prompt):
         qs = [
             schemas.ClarifyQuestion(
-                question="Is the ghost real or psychological?",
-                options=[schemas.ClarifyOption(label="A. Real", detail="Truly supernatural."),
+                question=f"Story decision {i + 1}: is the ghost real or psychological?",
+                options=[schemas.ClarifyOption(label="A. Real", detail="Truly supernatural.", recommended=True),
                          schemas.ClarifyOption(label="B. In her head", detail="Grief-driven.")],
                 allow_free_text=True,
             )
-        ][: self.clarify_questions]
+            for i in range(4)
+        ]
         return schemas.ClarifyResult(questions=qs)
 
     def _Blueprint(self, prompt):

@@ -44,6 +44,27 @@ def generate_text(prompt: str, *, thinking: str = config.THINK_LOW,
     return (resp.text or "").strip()
 
 
+def transcribe_audio(data: bytes, mime_type: str = "audio/webm") -> str:
+    """Transcribe a recording verbatim using the text model's audio input.
+
+    Used by the mic flow: the creator speaks their story idea and we turn it into
+    the plain text the pipeline expects. No separate STT model required.
+    """
+    resp = client().models.generate_content(
+        model=config.TEXT_MODEL,
+        contents=[
+            types.Part.from_bytes(data=data, mime_type=mime_type),
+            "Transcribe this recording verbatim. Return ONLY the spoken words as "
+            "plain prose — no timestamps, no speaker labels, no commentary. Fix "
+            "obvious disfluencies (um, uh, false starts) but change nothing else.",
+        ],
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level=config.THINK_LOW),
+        ),
+    )
+    return (resp.text or "").strip()
+
+
 def generate_structured(prompt: str, schema: type[T], *,
                         thinking: str = config.THINK_HIGH,
                         system: str | None = None) -> T:

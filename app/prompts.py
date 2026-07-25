@@ -46,16 +46,44 @@ def extract(idea: str, feedback: str = "") -> str:
 # Stage 2 — Clarify
 # ---------------------------------------------------------------------------
 def clarify(idea: str, extracted: dict[str, Any], feedback: str = "") -> str:
+    n = config.CLARIFY_QUESTION_COUNT
     return (
-        "Based on the story idea and extracted metadata, decide what is genuinely "
-        "unclear or missing before you could write a great series.\n\n"
-        "Ask AT MOST 5 questions. Ask FEWER (even zero) if the idea is already clear. "
-        "Each question should offer 2-4 concrete multiple-choice options (with a short "
-        "explanation each) AND allow free text. Options should be meaningfully different "
-        "creative directions, not trivia.\n\n"
+        f"Ask the creator EXACTLY {n} questions that will most improve the series.\n\n"
+        "Rules:\n"
+        f"- Exactly {n} questions. Not fewer, not more.\n"
+        "- Each question must be SPECIFIC to this story — name its characters, setting, or "
+        "premise. Never ask something already answered by the metadata below (don't ask "
+        "'what genre?' — the genre is already known).\n"
+        "- Ask about the things that genuinely change how the series is written: the "
+        "protagonist's motivation, the nature of the central mystery/conflict, what the "
+        "antagonist wants, the ending's direction, a key relationship, the level of "
+        "supernatural vs grounded, the stakes.\n"
+        "- Give each question 3-4 options that are meaningfully DIFFERENT creative "
+        "directions (not shades of the same answer). Each option needs a short concrete "
+        "`label` and a one-line `detail` describing what it would mean for the story.\n"
+        "- Mark EXACTLY ONE option per question as recommended=true — the one that would "
+        "make the strongest, most engaging series. All others must be recommended=false.\n"
+        "- Set allow_free_text to true for every question.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
-        f"EXTRACTED METADATA:\n{json.dumps(extracted, indent=2)}"
+        f"ALREADY KNOWN (do not ask about these):\n{json.dumps(extracted, indent=2)}"
         + _feedback_block(feedback)
+    )
+
+
+def confirm_card(idea: str, extracted: dict[str, Any], answers: list[dict]) -> str:
+    """Cheap pre-blueprint summary for the wizard's confirm step."""
+    return (
+        "Summarise this story into the few decisions a creator confirms before we "
+        "write the series.\n\n"
+        "Give it a short evocative TITLE (2-5 words) that suits the genre — this is "
+        "the name the series will be known by, so make it memorable, not descriptive. "
+        "Say whether the story genuinely benefits from a NARRATOR voice (true only if "
+        "it needs scene-setting or interior perspective that dialogue can't carry). "
+        "Recommend a focused first-season episode count and an average episode length "
+        "in minutes (5-15).\n\n"
+        f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
+        f"EXTRACTED METADATA:\n{json.dumps(extracted, indent=2)}\n\n"
+        f"CREATOR'S ANSWERS:\n{json.dumps(answers, indent=2)}"
     )
 
 
@@ -129,15 +157,23 @@ def episode_plan(blueprint: dict[str, Any], ep_count: int, ep_minutes: int,
 # Stage 6 — Script
 # ---------------------------------------------------------------------------
 def script(blueprint: dict[str, Any], episode: dict[str, Any],
-           prior_recap: str = "", feedback: str = "") -> str:
+           prior_recap: str = "", feedback: str = "",
+           include_narrator: bool | None = None) -> str:
     tag_list = ", ".join(f"[{t}]" for t in config.EMOTION_TAGS)
     recap = f"\n\nSTORY SO FAR (for continuity):\n{prior_recap}" if prior_recap else ""
+    narrator_rule = (
+        "NARRATOR: Do not write narration lines. The creator explicitly chose no "
+        "narrator; carry scene-setting through natural dialogue and sparse sound hints.\n\n"
+        if include_narrator is False else
+        "NARRATOR: Use narration only when it materially improves clarity or pacing.\n\n"
+    )
     return (
         "Write the full SCRIPT for this episode as an ordered list of lines.\n\n"
         "Each line is either 'narration' (speaker 'Narrator') or 'dialogue' (speaker = "
         "a character name). Write for the ear: natural, spoken, short beats, rising "
         "tension. Keep 2-4 speaking characters in any given scene. Open with a hook in "
         "the first moments and land the episode's cliffhanger at the end.\n\n"
+        + narrator_rule +
         "EMOTION — use SPARINGLY. Put an inline emotion tag at the START of a line's "
         "text ONLY when the emotion genuinely peaks or changes (a reveal, threat, "
         "breakdown). Most lines should have NO tag and read in a natural voice. Aim for "

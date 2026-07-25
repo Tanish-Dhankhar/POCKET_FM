@@ -10,7 +10,7 @@ from typing import Any
 
 from .. import prompts, schemas, store
 from ..llm import generate_structured
-from ..config import THINK_HIGH, THINK_LOW
+from ..config import THINK_HIGH, THINK_LOW, CLARIFY_QUESTION_COUNT
 from ..state import SeriesState
 
 
@@ -67,12 +67,56 @@ def gen_extract(state: SeriesState) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Stage 2 — Clarify
 # --------------------------------------------------------------------------- #
+def _normalise_clarify(clarification: dict[str, Any]) -> dict[str, Any]:
+    """Guarantee the UI's invariants regardless of what the model returned.
+
+    The schema already pins the count, but a guard here means a misbehaving model
+    can never break the wizard's fixed N-step flow:
+      - exactly CLARIFY_QUESTION_COUNT questions (trim, or pad with a generic one)
+      - every question has options and allows free text
+      - exactly one option per question is `recommended`
+    """
+    n = CLARIFY_QUESTION_COUNT
+    questions = list(clarification.get("questions") or [])[:n]
+
+    while len(questions) < n:
+        questions.append({
+            "question": "Anything else we should know before writing this series?",
+            "options": [
+                {"label": "Keep it as described", "detail": "Stay close to the idea.",
+                 "recommended": True},
+                {"label": "Surprise me", "detail": "Take a bolder creative swing.",
+                 "recommended": False},
+            ],
+            "allow_free_text": True,
+        })
+
+    for q in questions:
+        q["allow_free_text"] = True
+        options = list(q.get("options") or [])
+        if not options:
+            options = [
+                {"label": "Keep it as described", "detail": "Stay close to the idea.",
+                 "recommended": True},
+                {"label": "Surprise me", "detail": "Take a bolder creative swing.",
+                 "recommended": False},
+            ]
+        # exactly one recommended: keep the first flagged, else default to the first
+        flagged = [i for i, o in enumerate(options) if o.get("recommended")]
+        winner = flagged[0] if flagged else 0
+        for i, o in enumerate(options):
+            o["recommended"] = (i == winner)
+        q["options"] = options
+
+    return {"questions": questions}
+
+
 def gen_clarify(state: SeriesState) -> dict[str, Any]:
     res = generate_structured(
         prompts.clarify(state["idea"], _extracted(state), state.get("feedback", "")),
         schemas.ClarifyResult, thinking=THINK_HIGH, system=prompts.SYSTEM,
     )
-    clarification = res.model_dump()
+    clarification = _normalise_clarify(res.model_dump())
     store.save_clarification(state["series_id"], clarification)
     return {"clarification": clarification, "stage": "clarify"}
 
@@ -153,7 +197,8 @@ def gen_script(state: SeriesState) -> dict[str, Any]:
         num = ep["number"]
         sc = generate_structured(
             prompts.script(state["blueprint"], ep, _recap_before(state, num),
-                          state.get("feedback", "")),
+                          state.get("feedback", ""),
+                          state.get("include_narrator")),
             schemas.EpisodeScript, thinking=THINK_HIGH, system=prompts.SYSTEM,
         )
         lines = [ln.model_dump() for ln in sc.lines]
@@ -173,7 +218,8 @@ def gen_script_for_episode(state: SeriesState, number: int) -> list[dict[str, An
         raise ValueError(f"episode {number} is not in the plan")
     sc = generate_structured(
         prompts.script(state["blueprint"], ep, _recap_before(state, number),
-                      state.get("feedback", "")),
+                      state.get("feedback", ""),
+                      state.get("include_narrator")),
         schemas.EpisodeScript, thinking=THINK_HIGH, system=prompts.SYSTEM,
     )
     lines = [ln.model_dump() for ln in sc.lines]

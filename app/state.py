@@ -14,6 +14,7 @@ class SeriesState(TypedDict, total=False):
 
     # Stage 0 — the only required input
     idea: str
+    include_narrator: bool
 
     # Stage 1 — extracted then confirmed
     genre: str

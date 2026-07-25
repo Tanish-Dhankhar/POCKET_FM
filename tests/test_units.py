@@ -75,8 +75,9 @@ def test_sound_plan_defaults_to_empty():
     assert plan.music == [] and plan.sfx == []
 
 
-def test_clarify_result_accepts_zero_questions():
-    assert schemas.ClarifyResult(questions=[]).questions == []
+def test_clarify_result_requires_exactly_four_questions():
+    with pytest.raises(ValueError):
+        schemas.ClarifyResult(questions=[])
 
 
 # --------------------------------------------------------------------------- #

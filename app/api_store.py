@@ -8,6 +8,7 @@ Mounted under /studio by app/main.py.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,9 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import config, store
+from . import config, episode_service, jobs, prompts, schemas, store
+from .llm import generate_structured, transcribe_audio
+from .tts import render_line
 
 router = APIRouter(prefix="/studio", tags=["studio"])
 
@@ -213,6 +216,70 @@ def get_episode_audio(series_id: str, number: int) -> FileResponse:
 
 
 # --------------------------------------------------------------------------- #
+# episode generation (long-running -> job)
+# --------------------------------------------------------------------------- #
+@router.post("/series/{series_id}/episodes/{number}/generate", status_code=202)
+def generate_episode(series_id: str, number: int,
+                     force_script: bool = False) -> dict:
+    """Kick off script -> voices -> sound -> mix for ONE episode.
+
+    Returns 202 with a job id; poll /studio/jobs/{id} for progress. Clicking twice
+    rejoins the in-flight job rather than starting a duplicate TTS run.
+    Pass force_script=true to rewrite the script instead of reusing it.
+    """
+    _require(series_id)
+    if number not in store.episode_numbers(series_id):
+        raise HTTPException(404, f"episode {number} is not in the plan")
+    try:
+        return episode_service.start_episode_job(
+            series_id, number, force_script=force_script)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str) -> dict:
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"unknown job {job_id}")
+    return job
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Cooperative cancel — takes effect at the next step boundary."""
+    if not jobs.cancel(job_id):
+        raise HTTPException(409, "job is not cancellable")
+    return {"cancelled": job_id}
+
+
+# --------------------------------------------------------------------------- #
+# confirm card (pre-blueprint summary for the wizard)
+# --------------------------------------------------------------------------- #
+@router.post("/series/{series_id}/confirm-card")
+def confirm_card(series_id: str) -> dict:
+    """Title + narrator suggestion + recommended episode config.
+
+    The graph only recommends an episode count *after* the blueprint, but the
+    wizard's confirm step comes first — so this is one cheap Flash-Lite call over
+    the idea and the creator's answers. The title is persisted immediately.
+    """
+    _require(series_id)
+    inp = store.load_input(series_id)
+    bp = store.load_blueprint(series_id)
+    extracted = {k: bp.get(k) for k in
+                 ("genre", "theme", "tone", "setting", "language", "logline")}
+
+    card = generate_structured(
+        prompts.confirm_card(inp["idea"], extracted, inp["clarification_answers"]),
+        schemas.ConfirmCard, thinking=config.THINK_LOW, system=prompts.SYSTEM,
+    ).model_dump()
+
+    store.save_index(series_id, title=card["title"], genre=card["genre"])
+    return card
+
+
+# --------------------------------------------------------------------------- #
 # voices
 # --------------------------------------------------------------------------- #
 @router.get("/voices")
@@ -221,15 +288,31 @@ def list_voices() -> dict:
                        for name, style in config.VOICES.items()]}
 
 
+_SAMPLE_LINE = (
+    "Every story deserves a voice. [pause] Let me tell you how this one begins."
+)
+_sample_lock = threading.Lock()
+
+
 @router.get("/voices/{voice_id}/sample")
 def voice_sample(voice_id: str) -> FileResponse:
-    """Pre-generated sample clip (see tools/build_voice_samples.py)."""
+    """A short clip of a voice, rendered on first request and cached forever.
+
+    Pre-generating all 30 would take ~10 min at the free-tier TTS rate, so we
+    render lazily: the first preview of a given voice costs one TTS call, every
+    later preview is an instant file read.
+    """
     if voice_id not in config.VOICES:
         raise HTTPException(404, f"unknown voice {voice_id}")
     path = config.ASSETS_DIR / "voice_samples" / f"{voice_id}.wav"
     if not path.exists():
-        raise HTTPException(
-            503, "voice samples not generated yet — run tools/build_voice_samples.py")
+        # Serialise so parallel hovers over the same voice don't double-render.
+        with _sample_lock:
+            if not path.exists():
+                try:
+                    render_line(_SAMPLE_LINE, voice_id, path)
+                except Exception as exc:  # rate limit / model error
+                    raise HTTPException(503, f"could not render sample: {exc}") from exc
     return FileResponse(path, media_type="audio/wav", filename=f"{voice_id}.wav")
 
 
@@ -244,3 +327,23 @@ async def upload_source_audio(series_id: str, file: UploadFile = File(...)) -> d
     name = Path(file.filename or "source.wav").name
     path = store.save_source_audio(series_id, data, name)
     return {"saved": str(path), "bytes": len(data)}
+
+
+@router.post("/transcribe")
+async def transcribe(file: UploadFile = File(...)) -> dict:
+    """Speech -> text for the mic flow.
+
+    Flash-Lite accepts audio input directly, so no separate STT model is needed.
+    Returns the transcript only; the caller then POSTs it to /series as the idea.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty audio upload")
+    mime = file.content_type or "audio/webm"
+    try:
+        text = transcribe_audio(data, mime)
+    except Exception as exc:
+        raise HTTPException(502, f"transcription failed: {exc}") from exc
+    if not text.strip():
+        raise HTTPException(422, "could not hear any speech in that recording")
+    return {"transcript": text, "bytes": len(data), "mime": mime}
