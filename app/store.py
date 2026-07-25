@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -90,7 +91,7 @@ def lines_dir(series_id: str, number: int) -> Path:
 def write_json(path: Path, data: Any) -> Path:
     """Atomically write JSON (temp file + replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str),
                    encoding="utf-8")
     tmp.replace(path)
@@ -108,7 +109,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 def write_text(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(text or "", encoding="utf-8")
     tmp.replace(path)
     return path

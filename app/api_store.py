@@ -8,13 +8,13 @@ Mounted under /studio by app/main.py.
 """
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 
 from . import config, episode_service, jobs, prompts, schemas, store
 from .llm import generate_structured, transcribe_audio
@@ -47,7 +47,16 @@ class CharacterPatch(BaseModel):
 
 
 class ScriptPatch(BaseModel):
-    lines: list[dict[str, Any]]
+    lines: list[dict[str, Any]] = Field(max_length=config.MAX_SCRIPT_LINES)
+
+    @field_validator("lines")
+    @classmethod
+    def validate_lines(cls, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for line in lines:
+            text = line.get("text")
+            if isinstance(text, str) and len(text) > config.MAX_SCRIPT_LINE_CHARS:
+                raise ValueError("script line exceeds the configured size limit")
+        return lines
 
 
 class OutlinePatch(BaseModel):
@@ -66,6 +75,18 @@ class PlotPatch(BaseModel):
 def _require(series_id: str) -> None:
     if not store.series_dir(series_id).exists():
         raise HTTPException(404, f"unknown series {series_id}")
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """Read uploads in bounded chunks so oversized recordings fail predictably."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(config.UPLOAD_CHUNK_BYTES):
+        total += len(chunk)
+        if total > config.MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "audio upload exceeds the configured size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # --------------------------------------------------------------------------- #
@@ -233,6 +254,8 @@ def generate_episode(series_id: str, number: int,
     try:
         return episode_service.start_episode_job(
             series_id, number, force_script=force_script)
+    except jobs.QueueFullError as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -291,7 +314,6 @@ def list_voices() -> dict:
 _SAMPLE_LINE = (
     "Every story deserves a voice. [pause] Let me tell you how this one begins."
 )
-_sample_lock = threading.Lock()
 
 
 @router.get("/voices/{voice_id}/sample")
@@ -306,13 +328,10 @@ def voice_sample(voice_id: str) -> FileResponse:
         raise HTTPException(404, f"unknown voice {voice_id}")
     path = config.ASSETS_DIR / "voice_samples" / f"{voice_id}.wav"
     if not path.exists():
-        # Serialise so parallel hovers over the same voice don't double-render.
-        with _sample_lock:
-            if not path.exists():
-                try:
-                    render_line(_SAMPLE_LINE, voice_id, path)
-                except Exception as exc:  # rate limit / model error
-                    raise HTTPException(503, f"could not render sample: {exc}") from exc
+        try:
+            render_line(_SAMPLE_LINE, voice_id, path, cache_dir=config.TTS_CACHE_DIR)
+        except Exception as exc:  # rate limit / model error
+            raise HTTPException(503, f"could not render sample: {exc}") from exc
     return FileResponse(path, media_type="audio/wav", filename=f"{voice_id}.wav")
 
 
@@ -323,7 +342,7 @@ def voice_sample(voice_id: str) -> FileResponse:
 async def upload_source_audio(series_id: str, file: UploadFile = File(...)) -> dict:
     """Store the raw recording alongside its transcript in input/."""
     _require(series_id)
-    data = await file.read()
+    data = await _read_upload(file)
     name = Path(file.filename or "source.wav").name
     path = store.save_source_audio(series_id, data, name)
     return {"saved": str(path), "bytes": len(data)}
@@ -336,12 +355,12 @@ async def transcribe(file: UploadFile = File(...)) -> dict:
     Flash-Lite accepts audio input directly, so no separate STT model is needed.
     Returns the transcript only; the caller then POSTs it to /series as the idea.
     """
-    data = await file.read()
+    data = await _read_upload(file)
     if not data:
         raise HTTPException(400, "empty audio upload")
     mime = file.content_type or "audio/webm"
     try:
-        text = transcribe_audio(data, mime)
+        text = await run_in_threadpool(transcribe_audio, data, mime)
     except Exception as exc:
         raise HTTPException(502, f"transcription failed: {exc}") from exc
     if not text.strip():
