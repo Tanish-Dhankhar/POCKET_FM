@@ -189,4 +189,10 @@ def get_episode_audio(series_id: str, number: int) -> FileResponse:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "text_model": config.TEXT_MODEL, "tts_model": config.TTS_MODEL}
+    return {
+        "ok": True,
+        "text_model": config.TEXT_MODEL,
+        "tts_model": config.TTS_MODEL,
+        "tts_key_count": len(config.GEMINI_API_KEYS),
+        "tts_parallel_workers": config.TTS_PARALLEL_WORKERS,
+    }

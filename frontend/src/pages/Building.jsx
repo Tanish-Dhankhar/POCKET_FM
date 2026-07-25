@@ -1,30 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import * as flow from '../api/flow'
-import TypingText from '../components/TypingText'
-import { wittyLines } from '../lib/witty'
+import * as studio from '../api/studio'
+import GenerationLoader from '../components/GenerationLoader'
 import { useWizard } from '../store/wizard'
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve,ms))
+
 export default function Building() {
-  const { seriesId, confirm } = useWizard()
+  const {seriesId,confirm} = useWizard()
   const navigate = useNavigate()
   const started = useRef(false)
-  const [error, setError] = useState('')
+  const [status,setStatus] = useState({message:'Reading the shape of your story…',progress:8,error:''})
 
   async function build() {
-    setError('')
+    setStatus({message:'Writing the series blueprint…',progress:18,error:''})
     try {
-      await flow.buildSeries(seriesId, confirm)
-      navigate(`/series/${seriesId}`, { replace: true })
-    } catch (e) { setError(e.message); started.current = false }
+      await flow.buildSeries(seriesId,confirm)
+      setStatus({message:'Planning each cliffhanger…',progress:58,error:''})
+      const queued = await studio.regenerateAnalysis(seriesId)
+      while (true) {
+        const job = await studio.getJob(queued.id)
+        if (job.state === 'error') throw new Error(job.error || 'Story analysis failed.')
+        if (job.state === 'done') break
+        setStatus({message:job.message || 'Balancing genre and themes…',progress:82,error:''})
+        await wait(1000)
+      }
+      setStatus({message:'Your Ideaboard is ready.',progress:100,error:''})
+      navigate(`/series/${seriesId}`,{replace:true})
+    } catch (error) { setStatus((current) => ({...current,error:error.message})); started.current=false }
   }
 
-  useEffect(() => {
-    if (!seriesId || !confirm || started.current) return
-    started.current = true
-    build()
-  }, [seriesId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!seriesId || !confirm) return <div className="building"><div><h2>This build session has expired.</h2><p className="muted">The saved series is still on your dashboard.</p><Link className="button primary" to="/">Back to dashboard</Link></div></div>
-  return <div className="building"><div><p className="eyebrow">Building {confirm.title}</p><TypingText lines={wittyLines} /><p className="muted">Writing the series blueprint and planning each cliffhanger.</p><div className="indeterminate" />{error && <div style={{marginTop:28}}><p className="error">{error}</p><button className="button" onClick={() => { if (!started.current) { started.current = true; build() } }}>Try again</button></div>}</div></div>
+  useEffect(() => { if (seriesId && confirm && !started.current) { started.current=true; build() } }, [seriesId]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!seriesId || !confirm) return <GenerationLoader error="This build session expired. Your saved series is still available on the dashboard." onBack={() => navigate('/')}/>
+  return <GenerationLoader message={status.message} progress={status.progress} error={status.error} onRetry={() => {if (!started.current){started.current=true;build()}}} onBack={() => navigate('/')}/>
 }

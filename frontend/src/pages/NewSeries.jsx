@@ -1,14 +1,21 @@
+import { ArrowLeft, Mic2, PenLine } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { Link } from 'react-router-dom'
-import Header from '../components/Header'
+import { useNavigate } from 'react-router-dom'
+
+const choices = [
+  { path: '/new/write', icon: PenLine, label: 'Write', copy: 'Open a quiet editor and describe the world, conflict, and people in your story.' },
+  { path: '/new/mic', icon: Mic2, label: 'Speak', copy: 'Record the idea naturally. You can review the transcript before anything is generated.' },
+]
 
 export default function NewSeries() {
-  return <div className="shell">
-    <Header />
-    <p className="eyebrow">New series</p><h1>How do you want to begin?</h1>
-    <div className="choice-grid" style={{ marginTop: 34 }}>
-      <motion.div whileHover={{ y: -5 }} transition={{ duration:.22 }}><Link className="choice" to="/new/write"><span className="choice-icon">Aa</span><h2>Write it</h2><p>Open a quiet editor and tell us the whole idea in your own words.</p></Link></motion.div>
-      <motion.div whileHover={{ y: -5 }} transition={{ duration:.22 }}><Link className="choice" to="/new/mic"><span className="choice-icon">●</span><h2>Speak it</h2><p>Record the idea naturally. We’ll transcribe it before building anything.</p></Link></motion.div>
+  const navigate = useNavigate()
+  return <section className="choice-screen">
+    <button className="corner-back" onClick={() => navigate('/')}><ArrowLeft size={16}/> Dashboard</button>
+    <div className="choice-copy"><p className="eyebrow">New series</p><h1>How does the story arrive?</h1><p>Start with the format that feels natural. Both paths lead to the same guided story studio.</p></div>
+    <div className="choice-tiles">
+      {choices.map(({path,icon:Icon,label,copy}) => <motion.button key={path} className="choice-tile" whileHover={{y:-6}} whileTap={{scale:.98}} onClick={() => navigate(path)}>
+        <span className="choice-icon"><Icon size={46} strokeWidth={1.25}/></span><div><h2>{label}</h2><p>{copy}</p></div><span className="choice-arrow">↗</span>
+      </motion.button>)}
     </div>
-  </div>
+  </section>
 }

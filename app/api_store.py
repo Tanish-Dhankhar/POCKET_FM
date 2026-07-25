@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import config, episode_service, jobs, prompts, schemas, store
+from . import config, episode_service, jobs, prompts, schemas, store, story_service
 from .llm import generate_structured, transcribe_audio
 from .tts import render_line
 
@@ -42,6 +42,10 @@ class CharacterPatch(BaseModel):
     gender: str | None = None
     relationships: list[str] | None = None
     vocal_signature: str | None = None
+    details: str | None = None
+    physical_persona: str | None = None
+    backstory: str | None = None
+    vocal_direction: str | None = None
     voice_id: str | None = None
     is_narrator: bool | None = None
 
@@ -58,6 +62,21 @@ class PlotPatch(BaseModel):
     plot: dict[str, Any] | None = None
     theme: dict[str, Any] | None = None
     genre: dict[str, Any] | None = None
+
+
+class ConfirmationBody(BaseModel):
+    title: str
+    genre: str
+    setting: str
+    include_narrator: bool
+    ep_count: int
+    ep_minutes: int
+    genre_tags: list[str]
+    theme_tags: list[str]
+
+
+class RefinementBody(BaseModel):
+    instruction: str
 
 
 # --------------------------------------------------------------------------- #
@@ -126,6 +145,11 @@ def patch_blueprint(series_id: str, body: PlotPatch) -> dict:
         if patch:
             path = d / f"{key}.json"
             store.write_json(path, {**(store.read_json(path, {}) or {}), **patch})
+    swot_path = d / "swot.json"
+    swot = store.read_json(swot_path, {}) or {}
+    if swot:
+        swot["stale"] = True
+        store.write_json(swot_path, swot)
     store.save_index(series_id)
     return store.load_blueprint(series_id)
 
@@ -190,6 +214,10 @@ def put_script(series_id: str, number: int, body: ScriptPatch) -> dict:
     if info.pop("final", None):
         info["stale"] = True
         store.save_episode_audio(series_id, number, info)
+    evaluation = store.load_episode(series_id, number).get("evaluation", {})
+    if evaluation:
+        evaluation["stale"] = True
+        store.save_episode_evaluation(series_id, number, evaluation)
     store.save_index(series_id)
     return {"number": number, "lines": len(body.lines),
             "status": store.episode_status(series_id, number)}
@@ -277,6 +305,54 @@ def confirm_card(series_id: str) -> dict:
 
     store.save_index(series_id, title=card["title"], genre=card["genre"])
     return card
+
+
+@router.post("/series/{series_id}/confirmations")
+def save_confirmations(series_id: str, body: ConfirmationBody) -> dict:
+    _require(series_id)
+    values = body.model_dump()
+    if len({tag.strip().lower() for tag in values["genre_tags"] if tag.strip()}) != 4:
+        raise HTTPException(422, "exactly four unique genre tags are required")
+    if len({tag.strip().lower() for tag in values["theme_tags"] if tag.strip()}) != 4:
+        raise HTTPException(422, "exactly four unique theme tags are required")
+    store.save_confirmations(series_id, values)
+    store.save_index(series_id, title=body.title, genre=body.genre,
+                     include_narrator=body.include_narrator,
+                     ep_count=body.ep_count, ep_minutes=body.ep_minutes)
+    d = store.blueprint_dir(series_id)
+    genre = store.read_json(d / "genre.json", {}) or {}
+    genre.update({"genre": body.genre, "setting": body.setting, "tags": body.genre_tags})
+    store.write_json(d / "genre.json", genre)
+    theme = store.read_json(d / "theme.json", {}) or {}
+    theme["confirmed_tags"] = body.theme_tags
+    store.write_json(d / "theme.json", theme)
+    return values
+
+
+@router.post("/series/{series_id}/analysis/regenerate", status_code=202)
+def regenerate_analysis(series_id: str) -> dict:
+    _require(series_id)
+    return story_service.start_analysis_job(series_id)
+
+
+@router.post("/series/{series_id}/refine", status_code=202)
+def refine_series(series_id: str, body: RefinementBody) -> dict:
+    _require(series_id)
+    instruction = body.instruction.strip()
+    if not instruction:
+        raise HTTPException(422, "refinement instruction cannot be empty")
+    return story_service.start_refinement_job(series_id, instruction)
+
+
+@router.post("/series/{series_id}/episodes/{number}/evaluate")
+def evaluate_episode(series_id: str, number: int) -> dict:
+    _require(series_id)
+    if number not in store.episode_numbers(series_id):
+        raise HTTPException(404, f"unknown episode {number}")
+    try:
+        return story_service.evaluate_episode(series_id, number)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 # --------------------------------------------------------------------------- #

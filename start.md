@@ -19,6 +19,18 @@ Make sure the root `.env` file contains:
 GEMINI_API_KEY=your_gemini_api_key
 ```
 
+For faster TTS, provide multiple comma-separated keys. Each key receives its own
+rate-limit lane and one line can be rendered per key in parallel:
+
+```env
+GEMINI_API_KEY=your_primary_key
+GEMINI_API_KEYS=key_1,key_2,key_3
+TTS_PARALLEL_WORKERS=3
+```
+
+`TTS_PARALLEL_WORKERS` should normally be no greater than the total number of unique
+keys. The application automatically removes duplicate keys.
+
 The project uses:
 
 - `gemini-3.1-flash-lite` for story generation and transcription
@@ -85,9 +97,10 @@ current step:
 script → voices → sound → mix
 ```
 
-Gemini’s free-tier TTS quota is rate-limited, so an episode may take several minutes.
-Generate one episode at a time and avoid repeatedly clicking the Generate button while a
-job is already running.
+Gemini’s free-tier TTS quota is rate-limited per key or project. With multiple independent
+keys, episode lines are distributed across the key pool and rendered concurrently. A
+single key is still throttled safely, and retryable quota errors rotate to another key.
+Avoid repeatedly clicking Generate while a job is already running.
 
 ## 6. Production build check
 

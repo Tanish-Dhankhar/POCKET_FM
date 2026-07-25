@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import jobs, store
+from . import jobs, store, story_service
 from .nodes import audio as audio_nodes
 from .nodes import text as text_nodes
 
 # Weight of each step, used only to render a coherent overall progress bar.
-STEPS = ["script", "voices", "sound", "mix"]
+STEPS = ["script", "voices", "sound", "mix", "evaluate"]
 
 
 def _state_for(series_id: str) -> dict[str, Any]:
@@ -71,6 +71,10 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
     handle.step("mix", "Mixing the episode")
     final = audio_nodes.mix_episode(state, number)
 
+    # --- 5. evaluator ------------------------------------------------------
+    handle.step("evaluate", "Evaluating hook, pacing, and cliffhanger")
+    evaluation = story_service.evaluate_episode(series_id, number)
+
     store.save_index(series_id, stage="episode_ready")
     return {
         "number": number,
@@ -79,6 +83,7 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
         "sfx_cues": len(plan.get("sfx", [])),
         "duration_ms": final.get("total_ms"),
         "final": final.get("final"),
+        "evaluation_points": len(evaluation.get("points", [])),
         "status": store.episode_status(series_id, number),
     }
 

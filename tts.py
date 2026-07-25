@@ -2,11 +2,10 @@ import os
 import wave
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
 
-# Set your API key:
-# Windows PowerShell:
-# $env:GEMINI_API_KEY="YOUR_API_KEY"
-
+# Set your API key through the environment or the project .env file.
+load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 MODEL = "gemini-3.1-flash-tts-preview"
@@ -83,11 +82,8 @@ audio = response.candidates[0].content.parts[0].inline_data.data
 
 with wave.open("emotion_test.wav", "wb") as wf:
     wf.setnchannels(1)
-    wf.setsampwidth(2)      # 16-bit PCM
-    wf.setframerate(24000)  # 24 kHz
+    wf.setsampwidth(2)
+    wf.setframerate(24000)
     wf.writeframes(audio)
 
-print("✅ Saved emotion_test.wav")
-
-
-
+print("Saved emotion_test.wav")

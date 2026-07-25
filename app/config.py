@@ -6,6 +6,7 @@ caps, voice catalogue) lives here so the rest of the code stays declarative.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,6 +19,31 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+
+def _gemini_api_keys() -> list[str]:
+    """Read all configured Gemini keys and de-duplicate them."""
+    candidates = [GEMINI_API_KEY]
+    candidates.extend(re.split(r"[,;\s]+", os.environ.get("GEMINI_API_KEYS", "")))
+    numbered = sorted(
+        (name, value) for name, value in os.environ.items()
+        if name.startswith("GEMINI_API_KEY_")
+        and name[len("GEMINI_API_KEY_"):].isdigit()
+    )
+    candidates.extend(value for _, value in numbered)
+    keys: list[str] = []
+    for value in candidates:
+        value = value.strip().strip('"').strip("'")
+        if value and value not in keys:
+            keys.append(value)
+    return keys
+
+
+GEMINI_API_KEYS = _gemini_api_keys()
+# Keep the legacy single-key setting usable when only the pooled variable is set.
+# Text generation uses this value while TTS can rotate across the full pool.
+if not GEMINI_API_KEY and GEMINI_API_KEYS:
+    GEMINI_API_KEY = GEMINI_API_KEYS[0]
 
 # Origins allowed to call the API from a browser. Comma-separated override via
 # CORS_ORIGINS; "*" allows any origin (fine for local dev / a hackathon demo).
@@ -55,6 +81,11 @@ TTS_SAMPLE_WIDTH = 2           # bytes (16-bit)
 # space calls out and retry on 429. Set TTS_MIN_INTERVAL_SEC=0 on a paid tier.
 TTS_MIN_INTERVAL_SEC = float(os.environ.get("TTS_MIN_INTERVAL_SEC", "21"))
 TTS_MAX_RETRIES = 6
+TTS_PARALLEL_WORKERS = max(1, min(
+    int(os.environ.get("TTS_PARALLEL_WORKERS", str(len(GEMINI_API_KEYS) or 1))),
+    len(GEMINI_API_KEYS) or 1,
+    16,
+))
 
 PAUSE_BETWEEN_LINES_MS = 350   # natural gap when stitching dialogue lines
 MUSIC_DUCK_DB = -16            # bed level under speech

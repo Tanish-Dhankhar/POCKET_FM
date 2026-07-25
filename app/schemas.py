@@ -81,23 +81,30 @@ class ConfirmCard(BaseModel):
     recommended_ep_minutes: int = Field(
         ge=5, le=15, description="average episode length in minutes"
     )
+    genre_tags: list[str] = Field(min_length=4, max_length=4)
+    theme_tags: list[str] = Field(min_length=4, max_length=4)
 
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Series Blueprint
 # ---------------------------------------------------------------------------
 class CharacterProfile(BaseModel):
+    id: str = ""
     name: str
     role: str
     gender: str = Field(default="Unspecified", description="gender identity or presentation")
     description: str
     personality: str = Field(description="core traits driving their behaviour")
+    details: str = ""
+    physical_persona: str = ""
+    backstory: str = ""
     relationships: list[str] = Field(
         default_factory=list, description="ties to other characters, as short phrases"
     )
     vocal_signature: str = Field(
         description="how they sound: pace, pitch, verbal tics — guides casting & emotion"
     )
+    vocal_direction: str = ""
     is_narrator: bool = False
 
 
@@ -105,6 +112,7 @@ class Blueprint(BaseModel):
     logline: str
     story_world: str = Field(description="the setting/world and its rules")
     main_storyline: str = Field(description="overall plot arc of the series")
+    story_beats: list[str] = Field(default_factory=list, description="3-6 major series beats")
     tone: str
     theme: str
     characters: list[CharacterProfile]
@@ -138,12 +146,14 @@ class EpisodePlan(BaseModel):
 # Stage 6 — Script (per episode)
 # ---------------------------------------------------------------------------
 class ScriptLine(BaseModel):
+    id: str = ""
     type: Literal["narration", "dialogue"]
     speaker: str = Field(description="character name, or 'Narrator' for narration")
     text: str = Field(
         description="the spoken line; may contain an inline [Emotion] tag ONLY where "
                     "the emotion genuinely peaks/shifts — most lines carry no tag"
     )
+    emotion: Optional[str] = None
     sfx: list[str] = Field(
         default_factory=list,
         description="optional SFX keyword hints for this line; usually empty",
@@ -192,3 +202,40 @@ class SoundPlan(BaseModel):
     sfx: list[SfxCue] = Field(
         default_factory=list, description="only for concrete, script-mentioned events"
     )
+
+
+class GenreDistribution(BaseModel):
+    action: int = Field(ge=0, le=100)
+    drama: int = Field(ge=0, le=100)
+    comedy: int = Field(ge=0, le=100)
+    sci_fi: int = Field(ge=0, le=100)
+    horror: int = Field(ge=0, le=100)
+    thriller: int = Field(ge=0, le=100)
+    romance: int = Field(ge=0, le=100)
+
+
+class WeightedTheme(BaseModel):
+    label: str
+    percentage: int = Field(ge=0, le=100)
+
+
+class StoryAnalysis(BaseModel):
+    strengths: list[str] = Field(min_length=2, max_length=4)
+    weaknesses: list[str] = Field(min_length=2, max_length=4)
+    opportunities: list[str] = Field(min_length=2, max_length=4)
+    threats: list[str] = Field(min_length=2, max_length=4)
+    genre_description: str
+    genre_tags: list[str] = Field(min_length=4, max_length=4)
+    genre_distribution: GenreDistribution
+    theme_description: str
+    themes: list[WeightedTheme] = Field(min_length=4, max_length=4)
+
+
+class EvaluationPoint(BaseModel):
+    category: str
+    assessment: str
+    suggestion: str
+
+
+class EpisodeEvaluation(BaseModel):
+    points: list[EvaluationPoint] = Field(min_length=3, max_length=6)

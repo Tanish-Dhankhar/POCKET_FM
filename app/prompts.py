@@ -80,7 +80,8 @@ def confirm_card(idea: str, extracted: dict[str, Any], answers: list[dict]) -> s
         "Say whether the story genuinely benefits from a NARRATOR voice (true only if "
         "it needs scene-setting or interior perspective that dialogue can't carry). "
         "Recommend a focused first-season episode count and an average episode length "
-        "in minutes (5-15).\n\n"
+        "in minutes (5-15). Generate exactly four short GENRE TAGS and exactly four "
+        "short THEME TAGS grounded in this specific story. Avoid generic filler.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
         f"EXTRACTED METADATA:\n{json.dumps(extracted, indent=2)}\n\n"
         f"CREATOR'S ANSWERS:\n{json.dumps(answers, indent=2)}"
@@ -103,9 +104,11 @@ def blueprint(idea: str, extracted: dict[str, Any], answers: list[dict],
     return (
         "Write the complete SERIES BLUEPRINT — the foundation for the whole show.\n\n"
         "Include: a sharp logline, the story world and its rules, the overall main "
-        "storyline (with the potential to run for many episodes), the tone and theme, "
-        "and a full character roster. For every character give personality, "
-        "relationships, and a distinct VOCAL SIGNATURE (pace, pitch, verbal tics) so "
+        "storyline, 3-6 major story beats (with the potential to run for many episodes), "
+        "the tone and theme, "
+        "and a full character roster. For every character give personality, useful "
+        "details, physical persona, backstory, relationships, and a distinct VOCAL "
+        "SIGNATURE and VOCAL DIRECTION (pace, pitch, verbal tics) so "
         "voices are instantly distinguishable in audio. Mark exactly one character as "
         "the narrator ONLY if the story benefits from narration.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
@@ -174,11 +177,12 @@ def script(blueprint: dict[str, Any], episode: dict[str, Any],
         "tension. Keep 2-4 speaking characters in any given scene. Open with a hook in "
         "the first moments and land the episode's cliffhanger at the end.\n\n"
         + narrator_rule +
-        "EMOTION — use SPARINGLY. Put an inline emotion tag at the START of a line's "
-        "text ONLY when the emotion genuinely peaks or changes (a reveal, threat, "
-        "breakdown). Most lines should have NO tag and read in a natural voice. Aim for "
-        "at most roughly one tagged line in every three or four. Allowed tags only: "
-        f"{tag_list}. You may also use [pause].\n\n"
+        "EMOTION — use SPARINGLY. Store delivery direction in the separate `emotion` "
+        "field and keep `text` free of inline emotion prefixes. Use emotion=null for "
+        "natural delivery. Only set it when delivery differs materially from the "
+        "speaker's established voice, and never repeat it mechanically on adjacent "
+        f"lines. Allowed values only: {tag_list}. Use [pause] within text only for an "
+        "intentional silence, never as a default emotion.\n\n"
         "SOUND — keep it sparse. Leave 'sfx' as [] and 'music' as null for most lines. "
         "Only add an sfx hint for a concrete event the text mentions (thunder, door, "
         "footsteps). Only set 'music' (a mood word) on the FIRST line of a scene whose "
@@ -230,4 +234,38 @@ def sound_design(episode_lines: list[dict[str, Any]],
         "- Use ONLY these sfx keys: " + ", ".join(sfx_keys) + "\n\n"
         f"EPISODE LINES (index: (type) speaker: text):\n{numbered}"
         + _feedback_block(feedback)
+    )
+
+
+def story_analysis(blueprint: dict[str, Any], genre_tags: list[str],
+                   theme_tags: list[str], instruction: str = "") -> str:
+    return (
+        "Analyse this audio-series blueprint for its creator Ideaboard. Return a "
+        "concise literary SWOT with 2-4 points in each quadrant. Strengths and "
+        "weaknesses are qualities of the current story; opportunities are promising "
+        "directions; threats are risks such as repetition, unclear rules, or weak "
+        "audio-only comprehension.\n\n"
+        "Classify the genre across exactly these seven categories: action, drama, "
+        "comedy, sci_fi, horror, thriller, romance. Values should total roughly 100. "
+        "Return exactly four genre tags and exactly four weighted theme tags; theme "
+        "percentages should also total roughly 100. Preserve creator-confirmed tags "
+        "when they fit the blueprint.\n\n"
+        f"CONFIRMED GENRE TAGS: {json.dumps(genre_tags)}\n"
+        f"CONFIRMED THEME TAGS: {json.dumps(theme_tags)}\n"
+        f"BLUEPRINT:\n{json.dumps(blueprint, indent=2)}"
+        + _feedback_block(instruction)
+    )
+
+
+def episode_evaluation(blueprint: dict[str, Any], outline: dict[str, Any],
+                       script_lines: list[dict[str, Any]]) -> str:
+    return (
+        "Act as a concise audio-fiction script evaluator. Return 3-6 actionable points. "
+        "Cover the opening hook, distinct character voices, pacing and repetition, "
+        "emotional escalation, clarity without visuals, and cliffhanger strength where "
+        "relevant. For every point provide a short category, an honest assessment, and "
+        "one concrete suggestion. Do not praise generically or rewrite the script.\n\n"
+        f"SERIES BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
+        f"EPISODE OUTLINE:\n{json.dumps(outline, indent=2)}\n\n"
+        f"SCRIPT:\n{json.dumps(script_lines, indent=2)}"
     )

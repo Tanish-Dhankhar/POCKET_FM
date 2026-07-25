@@ -27,6 +27,9 @@ export async function listVoices() {
 
 export const voiceSampleUrl = (voice) => apiUrl(`/studio/voices/${encodeURIComponent(voice)}/sample`)
 export const confirmCard = (id) => post(`/studio/series/${id}/confirm-card`, {})
+export const saveConfirmations = (id, data) => post(`/studio/series/${id}/confirmations`, data)
+export const regenerateAnalysis = (id) => post(`/studio/series/${id}/analysis/regenerate`, {})
+export const refineSeries = (id, instruction) => post(`/studio/series/${id}/refine`, { instruction })
 export const listEpisodes = (id) => get(`/studio/series/${id}/episodes`)
 export const getEpisode = (id, number) => get(`/studio/series/${id}/episodes/${number}`)
 export const putScript = (id, number, lines) => put(`/studio/series/${id}/episodes/${number}/script`, { lines })
@@ -34,6 +37,7 @@ export const putOutline = (id, number, outline) => put(`/studio/series/${id}/epi
 export const audioUrl = (id, number, bust = '') => apiUrl(`/studio/series/${id}/episodes/${number}/audio${bust ? `?v=${bust}` : ''}`)
 export const generateEpisode = (id, number, forceScript = false) =>
   post(`/studio/series/${id}/episodes/${number}/generate?force_script=${forceScript}`, {})
+export const evaluateEpisode = (id, number) => post(`/studio/series/${id}/episodes/${number}/evaluate`, {})
 export const getJob = (jobId) => get(`/studio/jobs/${jobId}`)
 
 export async function transcribe(blob) {
