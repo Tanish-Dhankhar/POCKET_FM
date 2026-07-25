@@ -40,8 +40,8 @@ def _voice_for(state: SeriesState, speaker: str) -> str:
 # --------------------------------------------------------------------------- #
 # Stage 8 — Audio generation (TTS per line, concatenated)
 # --------------------------------------------------------------------------- #
-def render_episode_audio(state: SeriesState, number: int,
-                         progress=None) -> dict[str, Any]:
+def render_episode_audio(state: SeriesState, number: int, progress=None,
+                         cancelled=None) -> dict[str, Any]:
     """TTS every line of ONE episode, stitch it, and persist audio.json.
 
     `progress(done, total)` is called after each line so a job runner can report
@@ -52,12 +52,14 @@ def render_episode_audio(state: SeriesState, number: int,
     if not lines:
         raise ValueError(f"episode {number} has no script yet")
 
-    cache_dir = store.series_dir(sid) / "tts_cache"
+    cache_dir = config.TTS_CACHE_DIR
     ldir = store.lines_dir(sid, number)
     speakable = [(i, ln) for i, ln in enumerate(lines) if (ln.get("text") or "").strip()]
 
     line_files: list[str] = []
     for done, (i, ln) in enumerate(speakable, start=1):
+        if cancelled and cancelled():
+            raise InterruptedError("episode generation cancelled")
         voice = _voice_for(state, ln.get("speaker", "Narrator"))
         safe = _SAFE.sub("_", ln.get("speaker", "x"))[:20]
         out = ldir / f"{i:04d}_{safe}.wav"
@@ -65,6 +67,9 @@ def render_episode_audio(state: SeriesState, number: int,
         line_files.append(str(out))
         if progress:
             progress(done, len(speakable))
+
+    if cancelled and cancelled():
+        raise InterruptedError("episode generation cancelled")
 
     track, offsets = audio_engine.concat_lines(line_files)
     voices_path = _ep_dir(state, number) / f"ep{int(number):02d}_voices.wav"

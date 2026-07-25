@@ -56,7 +56,12 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
     def on_line(done: int, total: int) -> None:
         handle.progress(done, total, f"Voicing line {done} of {total}")
 
-    manifest = audio_nodes.render_episode_audio(state, number, progress=on_line)
+    try:
+        manifest = audio_nodes.render_episode_audio(
+            state, number, progress=on_line, cancelled=handle.cancelled,
+        )
+    except InterruptedError:
+        return {"cancelled": True, "step": "voices"}
     state.setdefault("audio_manifest", {})[str(number)] = manifest
 
     if handle.cancelled():
@@ -67,9 +72,15 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
     plan = audio_nodes.design_episode_sound(state, number)
     state.setdefault("sound_plans", {})[str(number)] = plan
 
+    if handle.cancelled():
+        return {"cancelled": True, "step": "sound"}
+
     # --- 4. mix ------------------------------------------------------------
     handle.step("mix", "Mixing the episode")
     final = audio_nodes.mix_episode(state, number)
+
+    if handle.cancelled():
+        return {"cancelled": True, "step": "mix"}
 
     store.save_index(series_id, stage="episode_ready")
     return {
@@ -85,13 +96,9 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
 
 def start_episode_job(series_id: str, number: int, *, force_script: bool = False) -> dict:
     """Start (or rejoin) a generation job for this episode."""
-    existing = jobs.find_active("episode", series_id=series_id, number=number)
-    if existing:
-        return existing  # a second click rejoins rather than duplicating the work
-
-    job_id = jobs.start(
+    return jobs.start_or_rejoin(
         "episode",
         lambda h: generate_episode(series_id, number, h, force_script=force_script),
+        dedupe_key=("episode", series_id, number),
         series_id=series_id, number=number, steps=STEPS,
     )
-    return jobs.get(job_id)

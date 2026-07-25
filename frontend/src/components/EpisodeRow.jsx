@@ -17,7 +17,7 @@ export default function EpisodeRow({ seriesId, episode }) {
   })
   const job = useQuery({
     queryKey: ['job', jobId], queryFn: () => studio.getJob(jobId), enabled: Boolean(jobId),
-    refetchInterval: (query) => ['done', 'error'].includes(query.state.data?.state) ? false : 2000,
+    refetchInterval: (query) => ['done', 'error', 'cancelled'].includes(query.state.data?.state) ? false : 2000,
   })
   const jobData = job.data
   useEffect(() => {
@@ -42,6 +42,7 @@ export default function EpisodeRow({ seriesId, episode }) {
         {episode.cliffhanger && <p><strong>Cliffhanger:</strong> {episode.cliffhanger}</p>}
         {busy && <div className="job"><div className="row between" style={{ marginBottom: 8 }}><span>{jobData?.message || 'Starting…'}</span><span>{jobData?.step === 'voices' && total ? `${jobData.done}/${total}` : steps[jobData?.step]}</span></div><div className="job-track"><div className="job-fill" style={{ width: `${stepProgress}%` }} /></div></div>}
         {jobData?.state === 'error' && <p className="error">{jobData.error || 'Generation failed.'}</p>}
+        {jobData?.state === 'cancelled' && <p className="muted">Generation cancelled.</p>}
         {generation.error && <p className="error">{generation.error.message}</p>}
         <div className="row" style={{ marginTop: 14 }}>
           {ready ? <button className="button primary small" onClick={() => navigate(`/series/${seriesId}/episodes/${episode.number}`)}>Preview episode</button> : <button className="button primary small" disabled={busy} onClick={() => generation.mutate()}>{busy ? 'Generating…' : episode.status === 'planned' ? 'Generate episode' : 'Continue generation'}</button>}

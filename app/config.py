@@ -55,6 +55,28 @@ TTS_SAMPLE_WIDTH = 2           # bytes (16-bit)
 # space calls out and retry on 429. Set TTS_MIN_INTERVAL_SEC=0 on a paid tier.
 TTS_MIN_INTERVAL_SEC = float(os.environ.get("TTS_MIN_INTERVAL_SEC", "21"))
 TTS_MAX_RETRIES = 6
+TTS_MAX_CONCURRENCY = max(1, int(os.environ.get("TTS_MAX_CONCURRENCY", "1")))
+TTS_CACHE_DIR = Path(os.environ.get("TTS_CACHE_DIR", str(OUTPUT_DIR / "tts_cache")))
+
+# Provider protection. The API routes remain synchronous, but these limits keep
+# a burst of creator requests from exhausting every request thread or provider slot.
+MODEL_TIMEOUT_MS = max(1_000, int(os.environ.get("MODEL_TIMEOUT_MS", "120000")))
+MODEL_MAX_RETRIES = max(1, int(os.environ.get("MODEL_MAX_RETRIES", "3")))
+MODEL_MAX_CONCURRENCY = max(1, int(os.environ.get("MODEL_MAX_CONCURRENCY", "8")))
+
+# In-process job controls. These deliberately do not imply multi-instance
+# durability; PostgreSQL/queue-backed work remains a later migration.
+JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "2")))
+JOB_MAX_QUEUE = max(1, int(os.environ.get("JOB_MAX_QUEUE", "100")))
+JOB_MAX_RETAINED = max(1, int(os.environ.get("JOB_MAX_RETAINED", "200")))
+
+# Input guardrails cap memory and provider work without affecting normal ideas,
+# recordings, or scripts.
+MAX_IDEA_CHARS = max(1_000, int(os.environ.get("MAX_IDEA_CHARS", "50000")))
+MAX_UPLOAD_BYTES = max(1_024 * 1_024, int(os.environ.get("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))))
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_SCRIPT_LINES = max(1, int(os.environ.get("MAX_SCRIPT_LINES", "1000")))
+MAX_SCRIPT_LINE_CHARS = max(100, int(os.environ.get("MAX_SCRIPT_LINE_CHARS", "4000")))
 
 PAUSE_BETWEEN_LINES_MS = 350   # natural gap when stitching dialogue lines
 MUSIC_DUCK_DB = -16            # bed level under speech

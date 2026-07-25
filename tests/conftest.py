@@ -181,6 +181,7 @@ def tmp_output(monkeypatch, tmp_path) -> Path:
     """Redirect all rendered artifacts into a temp dir."""
     out = tmp_path / "output"
     monkeypatch.setattr(config, "OUTPUT_DIR", out)
+    monkeypatch.setattr(config, "TTS_CACHE_DIR", out / "tts_cache")
     monkeypatch.setattr("app.nodes.audio.config.OUTPUT_DIR", out)
     return out
 
