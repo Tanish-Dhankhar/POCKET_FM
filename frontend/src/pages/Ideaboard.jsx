@@ -139,6 +139,7 @@ export default function Ideaboard() {
   const [activeCharacter, setActiveCharacter] = useState(null)
   const [picker, setPicker] = useState(false)
   const [characterDraft, setCharacterDraft] = useState(null)
+  const [editingCharacter, setEditingCharacter] = useState(false)
   const [plotDraft, setPlotDraft] = useState(null)
   const [editingStory, setEditingStory] = useState(false)
   const [editingSetting, setEditingSetting] = useState(false)
@@ -168,7 +169,11 @@ export default function Ideaboard() {
   })
   const saveCharacter = useMutation({
     mutationFn: (draft) => studio.patchCharacter(id, characterKey(activeCharacter), draft),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['series', id] }); setActiveCharacter(null) },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['series', id] })
+      setEditingCharacter(false)
+      setActiveCharacter(null)
+    },
   })
   const chooseVoice = useMutation({
     mutationFn: (voice) => studio.patchCharacter(id, characterKey(activeCharacter), { voice_id: voice }),
@@ -230,7 +235,10 @@ export default function Ideaboard() {
   }, [curveQuery.data?.state, curveQuery.data?.error, id, queryClient])
 
   useEffect(() => {
-    if (activeCharacter) setCharacterDraft({ ...activeCharacter })
+    if (activeCharacter) {
+      setCharacterDraft({ ...activeCharacter })
+      setEditingCharacter(false)
+    }
   }, [activeCharacter])
 
   const bp = data?.blueprint || {}
@@ -770,7 +778,7 @@ export default function Ideaboard() {
         {characterDraft && (
           <div>
             {/* Header */}
-            <div className="flex items-center gap-4 mb-6">
+            <div className="flex items-center gap-4 mb-6 pr-10">
               <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900 text-neutral-500">
                 {characterDraft.has_image ? (
                   <img
@@ -782,51 +790,74 @@ export default function Ideaboard() {
                   <UserRound className="h-9 w-9" strokeWidth={1.5} />
                 )}
               </div>
-              <div>
-                <h3 className="text-xl font-bold tracking-tight text-white">{characterDraft.name}</h3>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-xl font-bold tracking-tight text-white">{characterDraft.name}</h3>
+                  <EditIconButton
+                    label={editingCharacter ? 'Done editing' : 'Edit character'}
+                    editing={editingCharacter}
+                    onClick={() => setEditingCharacter((v) => !v)}
+                  />
+                </div>
                 <p className="mt-0.5 text-sm text-[#E61C38]">{characterDraft.role}</p>
                 <p className="mt-0.5 text-xs text-neutral-500">{characterDraft.gender}</p>
               </div>
             </div>
 
-            {/* Editable fields */}
-            <div className="flex flex-col gap-4">
+            {/* Character fields — plain text by default, editable on toggle */}
+            <div className="flex flex-col gap-6">
               {[
-                ['personality',    'Personality'],
-                ['details',        'Details'],
+                ['personality',     'Personality'],
+                ['details',         'Details'],
                 ['physical_persona','Physical Persona'],
-                ['backstory',      'Backstory'],
-                ['vocal_direction','Vocal direction'],
-              ].map(([key, label]) => (
-                <label key={key} className="flex flex-col gap-1.5">
-                  <span className="text-xs font-bold tracking-widest text-neutral-500 uppercase">{label}</span>
-                  <textarea
-                    value={
-                      characterDraft[key] ||
-                      characterDraft[
-                        key === 'details'        ? 'description'    :
-                        key === 'vocal_direction' ? 'vocal_signature' : key
-                      ] || ''
-                    }
-                    onChange={(e) => updateCharacter(key, e.target.value)}
-                    rows={2}
-                    className="w-full resize-y rounded-lg border border-neutral-700 bg-black/40 px-3 py-2 text-sm leading-6 text-neutral-200 outline-none transition-colors focus:border-[#E61C38]/70"
-                  />
-                </label>
-              ))}
+                ['backstory',       'Backstory'],
+                ['vocal_direction', 'Vocal direction'],
+              ].map(([key, label]) => {
+                const value =
+                  characterDraft[key] ||
+                  characterDraft[
+                    key === 'details'         ? 'description'     :
+                    key === 'vocal_direction' ? 'vocal_signature' : key
+                  ] || ''
+                return (
+                  <div key={key} className="flex flex-col gap-1.5">
+                    <span className="text-xs font-bold tracking-widest text-neutral-500 uppercase">{label}</span>
+                    {editingCharacter ? (
+                      <textarea
+                        value={value}
+                        onChange={(e) => updateCharacter(key, e.target.value)}
+                        rows={2}
+                        className="w-full resize-y bg-transparent px-0 py-0.5 text-sm leading-6 text-neutral-200 outline-none border-0 border-b border-neutral-800 focus:border-[#E61C38]/70 transition-colors"
+                      />
+                    ) : (
+                      <p className="text-sm leading-6 text-neutral-300">
+                        {value || 'Not specified yet.'}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
 
-              <label className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-bold tracking-widest text-neutral-500 uppercase">Relationships</span>
-                <textarea
-                  value={(characterDraft.relationships || []).join('\n')}
-                  onChange={(e) => updateCharacter('relationships', e.target.value.split('\n').filter(Boolean))}
-                  rows={2}
-                  className="w-full resize-y rounded-lg border border-neutral-700 bg-black/40 px-3 py-2 text-sm leading-6 text-neutral-200 outline-none transition-colors focus:border-[#E61C38]/70"
-                />
-              </label>
+                {editingCharacter ? (
+                  <textarea
+                    value={(characterDraft.relationships || []).join('\n')}
+                    onChange={(e) => updateCharacter('relationships', e.target.value.split('\n').filter(Boolean))}
+                    rows={2}
+                    className="w-full resize-y bg-transparent px-0 py-0.5 text-sm leading-6 text-neutral-200 outline-none border-0 border-b border-neutral-800 focus:border-[#E61C38]/70 transition-colors"
+                  />
+                ) : (
+                  <p className="text-sm leading-6 text-neutral-300">
+                    {(characterDraft.relationships || []).length
+                      ? (characterDraft.relationships || []).join(' · ')
+                      : 'None listed yet.'}
+                  </p>
+                )}
+              </div>
 
               {/* Voice row */}
-              <div className="flex items-center justify-between rounded-xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
+              <div className="flex items-center justify-between border-t border-neutral-800 pt-5">
                 <div>
                   <span className="block text-xs font-bold tracking-widest text-neutral-500 uppercase">Voice</span>
                   <strong className="block mt-1 text-sm font-semibold text-white">
@@ -842,16 +873,16 @@ export default function Ideaboard() {
                 </button>
               </div>
 
-              {/* Save */}
-              <button
-                type="button"
-                className="self-end inline-flex items-center gap-2 rounded-xl bg-[#E61C38] px-5 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                disabled={saveCharacter.isPending}
-                onClick={() => saveCharacter.mutate(characterDraft)}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                Save character
-              </button>
+              {editingCharacter && (
+                <button
+                  type="button"
+                  className="self-end inline-flex items-center gap-2 rounded-xl bg-[#E61C38] px-5 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                  disabled={saveCharacter.isPending}
+                  onClick={() => saveCharacter.mutate(characterDraft)}
+                >
+                  Save character
+                </button>
+              )}
             </div>
           </div>
         )}
