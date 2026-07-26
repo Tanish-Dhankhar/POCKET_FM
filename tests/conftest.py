@@ -170,6 +170,21 @@ class FakeLLM:
             ],
         )
 
+    def _EmotionCurve(self, prompt):
+        # Honour however many episodes were actually listed in the prompt.
+        count = prompt.count("emotional focus:")
+        count = count or 1
+        return schemas.EmotionCurve(
+            emotion_1_label="Tension", emotion_2_label="Grief", emotion_3_label="Hope",
+            dominant_emotion="Tension",
+            summary="Tension climbs through the middle nights before hope breaks through.",
+            points=[
+                schemas.EmotionCurvePoint(
+                    episode=i, emotion_1=30 + i * 10, emotion_2=40, emotion_3=15 + i * 5,
+                ) for i in range(1, count + 1)
+            ],
+        )
+
     def _EpisodeEvaluation(self, prompt):
         return schemas.EpisodeEvaluation(points=[
             schemas.EvaluationPoint(category="Hook", assessment="Immediate tension.", suggestion="Keep the first sound unexplained."),

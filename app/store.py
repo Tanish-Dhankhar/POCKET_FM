@@ -274,71 +274,87 @@ def load_blueprint(series_id: str) -> dict[str, Any]:
         "genre_tags": genre.get("tags", []),
         "setting": genre.get("setting", ""),
         "language": genre.get("language", ""),
+        "emotional_curve": load_emotional_curve(series_id),
         "characters": load_characters(series_id),
         "emotional_curve": load_emotional_curve(series_id),
     }
 
 
-def _emotion_key(label: str) -> str:
-    return re.sub(r"_+", "_", _SLUG.sub("_", (label or "").strip().lower())).strip("_") \
-        or "emotion"
+# --------------------------------------------------------------------------- #
+# emotional curve (top-3 tracked emotions across the episode plan)
+# --------------------------------------------------------------------------- #
+def _emotion_key(label: str, taken: set[str]) -> str:
+    """Chart-friendly dataKey for an emotion label ('Cold Betrayal' -> 'cold_betrayal')."""
+    key = slug(label).replace("-", "_") or "emotion"
+    base = key
+    n = 2
+    while key in taken:
+        key = f"{base}_{n}"
+        n += 1
+    taken.add(key)
+    return key
 
 
-def load_emotional_curve(series_id: str) -> dict[str, Any]:
-    return read_json(blueprint_dir(series_id) / "emotional_curve.json", {}) or {}
+def emotional_curve_path(series_id: str) -> Path:
+    return blueprint_dir(series_id) / "emotional_curve.json"
 
 
 def save_emotional_curve(series_id: str, analysis: dict[str, Any],
-                         outlines: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Persist chart-ready, stable emotion keys derived from model output."""
-    outlines = outlines if outlines is not None else load_outlines(series_id)
-    labels = [str(analysis.get(f"emotion_{i}_label") or f"Emotion {i}").strip()
-              for i in range(1, 4)]
-    keys: list[str] = []
-    counts: dict[str, int] = {}
-    for label in labels:
-        base = _emotion_key(label)
-        counts[base] = counts.get(base, 0) + 1
-        keys.append(base if counts[base] == 1 else f"{base}_{counts[base]}")
+                         episodes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Persist the top-3 emotion arc, one intensity score per emotion per episode."""
+    revision = int(load_index(series_id).get("revision", 1) or 1)
+    episodes = episodes if episodes is not None else load_outlines(series_id)
+    titles = {int(ep.get("number", 0)): ep.get("title", "") for ep in episodes}
 
-    titles = {int(row.get("number", 0)): row.get("title", "") for row in outlines}
+    labels = [
+        (analysis.get("emotion_1_label") or "Tension").strip() or "Tension",
+        (analysis.get("emotion_2_label") or "Hope").strip() or "Hope",
+        (analysis.get("emotion_3_label") or "Grief").strip() or "Grief",
+    ]
+    taken: set[str] = set()
+    keys = [_emotion_key(label, taken) for label in labels]
+
     points = []
-    for raw in sorted(analysis.get("points") or [], key=lambda row: int(row.get("episode", 0))):
-        episode = int(raw.get("episode", 0))
-        point: dict[str, Any] = {
-            "episode": episode, "beat": f"E{episode}",
-            "title": titles.get(episode, f"Episode {episode}"),
-        }
-        for i, key in enumerate(keys, start=1):
-            try:
-                value = int(round(float(raw.get(f"emotion_{i}", 0))))
-            except (TypeError, ValueError):
-                value = 0
-            point[key] = min(100, max(0, value))
+    for row in analysis.get("points", []):
+        number = int(row.get("episode", 0) or 0)
+        if number <= 0:
+            continue
+        point = {"episode": number, "beat": f"E{number}", "title": titles.get(number, "")}
+        for key, field in zip(keys, ("emotion_1", "emotion_2", "emotion_3")):
+            point[key] = max(0, min(100, int(row.get(field, 0) or 0)))
         points.append(point)
+    points.sort(key=lambda p: p["episode"])
 
-    dominant_raw = str(analysis.get("dominant_emotion") or "").strip().lower()
-    dominant = next((key for label, key in zip(labels, keys)
-                     if label.lower() == dominant_raw), keys[0])
-    saved = {
-        "emotions": [{"key": key, "label": label}
-                     for key, label in zip(keys, labels)],
-        "dominant_emotion": dominant,
-        "summary": str(analysis.get("summary") or ""),
+    dominant_raw = (analysis.get("dominant_emotion") or labels[0]).strip().lower()
+    dominant_key = keys[0]
+    for label, key in zip(labels, keys):
+        if label.strip().lower() == dominant_raw:
+            dominant_key = key
+            break
+
+    curve = {
+        "emotions": [{"key": key, "label": label} for key, label in zip(keys, labels)],
         "points": points,
-        "stale": False,
+        "dominant_emotion": dominant_key,
+        "summary": analysis.get("summary", ""),
+        "source_revision": revision,
         "generated_at": _now(),
+        "stale": False,
     }
-    write_json(blueprint_dir(series_id) / "emotional_curve.json", saved)
-    return saved
+    write_json(emotional_curve_path(series_id), curve)
+    return curve
+
+
+def load_emotional_curve(series_id: str) -> dict[str, Any]:
+    return read_json(emotional_curve_path(series_id), {}) or {}
 
 
 def mark_emotional_curve_stale(series_id: str) -> None:
-    curve = load_emotional_curve(series_id)
-    if not curve:
-        return
-    curve["stale"] = True
-    write_json(blueprint_dir(series_id) / "emotional_curve.json", curve)
+    path = emotional_curve_path(series_id)
+    curve = read_json(path, {}) or {}
+    if curve:
+        curve["stale"] = True
+        write_json(path, curve)
 
 
 def save_voice_cast(series_id: str, voice_cast: dict[str, str]) -> None:

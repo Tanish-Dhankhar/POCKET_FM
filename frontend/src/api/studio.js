@@ -31,6 +31,8 @@ export const characterImageUrl = (id, key) => apiUrl(`/studio/series/${id}/chara
 export const confirmCard = (id) => post(`/studio/series/${id}/confirm-card`, {})
 export const saveConfirmations = (id, data) => post(`/studio/series/${id}/confirmations`, data)
 export const regenerateAnalysis = (id) => post(`/studio/series/${id}/analysis/regenerate`, {})
+export const getEmotionalCurve = (id) => get(`/studio/series/${id}/emotional-curve`)
+export const regenerateEmotionalCurve = (id) => post(`/studio/series/${id}/emotional-curve/regenerate`, {})
 export const refineSeries = (id, instruction) => post(`/studio/series/${id}/refine`, { instruction })
 export const listEpisodes = (id) => get(`/studio/series/${id}/episodes`)
 export const getEpisode = (id, number) => get(`/studio/series/${id}/episodes/${number}`)

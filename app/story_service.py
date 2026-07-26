@@ -42,18 +42,64 @@ def generate_analysis(series_id: str, instruction: str = "") -> dict[str, Any]:
 
 
 def start_analysis_job(series_id: str, instruction: str = "") -> dict[str, Any]:
-    existing = jobs.find_active("analysis", series_id=series_id)
-    if existing:
-        return existing
-
     def worker(handle: jobs.JobHandle) -> dict[str, Any]:
         handle.step("analysis", "Analysing story, genres, and themes")
         result = generate_analysis(series_id, instruction)
         handle.progress(1, 1, "Analysis ready")
         return {"series_id": series_id, "analysis": result}
 
-    job_id = jobs.start("analysis", worker, series_id=series_id, steps=["analysis"])
-    return jobs.get(job_id) or {"id": job_id}
+    return jobs.start_or_rejoin(
+        "analysis", worker,
+        dedupe_key=("analysis", series_id),
+        series_id=series_id, steps=["analysis"],
+    )
+
+
+def _emotional_curve_input(series_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    bp = store.load_blueprint(series_id)
+    blueprint = {
+        "genre": bp.get("genre", ""),
+        "theme": bp.get("theme", ""),
+        "main_storyline": bp.get("main_storyline", ""),
+    }
+    episodes = [
+        {
+            "number": outline.get("number"),
+            "title": outline.get("title", ""),
+            "summary": outline.get("summary", ""),
+            "emotional_focus": outline.get("emotional_focus", ""),
+            "cliffhanger": outline.get("cliffhanger", ""),
+        }
+        for outline in store.load_outlines(series_id)
+    ]
+    return blueprint, episodes
+
+
+def generate_emotional_curve(series_id: str, instruction: str = "") -> dict[str, Any]:
+    blueprint, episodes = _emotional_curve_input(series_id)
+    if not episodes:
+        raise ValueError("generate the episode plan before building an emotional curve")
+    result = generate_structured(
+        prompts.emotional_curve(blueprint, episodes, instruction),
+        schemas.EmotionCurve,
+        thinking=config.THINK_HIGH,
+        system=prompts.SYSTEM,
+    )
+    return store.save_emotional_curve(series_id, result.model_dump(), episodes)
+
+
+def start_emotional_curve_job(series_id: str, instruction: str = "") -> dict[str, Any]:
+    def worker(handle: jobs.JobHandle) -> dict[str, Any]:
+        handle.step("emotional_curve", "Charting the emotional arc across episodes")
+        result = generate_emotional_curve(series_id, instruction)
+        handle.progress(1, 1, "Emotional curve ready")
+        return {"series_id": series_id, "emotional_curve": result}
+
+    return jobs.start_or_rejoin(
+        "emotional_curve", worker,
+        dedupe_key=("emotional_curve", series_id),
+        series_id=series_id, steps=["emotional_curve"],
+    )
 
 
 def generate_emotional_curve(series_id: str) -> dict[str, Any]:
@@ -175,13 +221,10 @@ def refine_series(series_id: str, instruction: str, handle: jobs.JobHandle) -> d
 
 
 def start_refinement_job(series_id: str, instruction: str) -> dict[str, Any]:
-    existing = jobs.find_active("refinement", series_id=series_id)
-    if existing:
-        return existing
-    job_id = jobs.start(
+    return jobs.start_or_rejoin(
         "refinement",
         lambda handle: refine_series(series_id, instruction, handle),
+        dedupe_key=("refinement", series_id),
         series_id=series_id,
         steps=["blueprint", "analysis", "episodes"],
     )
-    return jobs.get(job_id) or {"id": job_id}
