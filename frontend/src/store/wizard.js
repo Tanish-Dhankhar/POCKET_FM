@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 const initial = {
   mode: 'write', idea: '', transcript: '', sourceBlob: null, seriesId: null,
-  questions: [], answers: [], confirm: null,
+  questions: [], answers: [], confirm: null, demoReplay: false,
 }
 
 export const useWizard = create((set) => ({

@@ -9,6 +9,7 @@ Mounted under /studio by app/main.py.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from . import config, episode_service, jobs, prompts, schemas, store, story_service
+from . import config, demo_replay, episode_service, jobs, prompts, schemas, store, story_service
 from .llm import generate_structured, transcribe_audio
 from .tts import render_line
 
@@ -133,7 +134,11 @@ def get_series(series_id: str) -> dict:
         "episodes": [
             {**(store.read_json(store.episode_dir(series_id, n) / "outline.json", {}) or {}),
              "number": n,
-             "status": store.episode_status(series_id, n)}
+             "status": (
+                 store.episode_status(series_id, n)
+                 if not demo_replay.is_replay(series_id) or demo_replay.episode_is_revealed(series_id, n)
+                 else "planned"
+             )}
             for n in store.episode_numbers(series_id)
         ],
     }
@@ -331,6 +336,38 @@ def generate_episode(series_id: str, number: int,
     _require(series_id)
     if number not in store.episode_numbers(series_id):
         raise HTTPException(404, f"episode {number} is not in the plan")
+    if demo_replay.is_replay(series_id):
+        if number != 1:
+            raise HTTPException(409, "only Episode 1 is prepared for the cached demo")
+
+        def replay_episode_worker(handle: jobs.JobHandle) -> dict:
+            handle.step("script", "Loading the cached screenplay")
+            handle.progress(1, 4, "Restoring the 20-line performance script")
+            time.sleep(config.DEMO_REPLAY_STEP_DELAY_SEC)
+            handle.step("voices", "Restoring the cached character performances")
+            handle.progress(2, 4, "Timing interruptions and overlapping dialogue")
+            time.sleep(config.DEMO_REPLAY_STEP_DELAY_SEC)
+            handle.step("cinematic", "Assembling the cinematic audio edit")
+            handle.progress(3, 4, "Applying music dips, the ENOUGH cut, and silence")
+            time.sleep(config.DEMO_REPLAY_STEP_DELAY_SEC)
+            demo_replay.reveal_episode(series_id, number)
+            handle.progress(4, 4, "Cached episode ready")
+            manifest = store.load_audio_manifest(series_id).get(str(number), {})
+            return {
+                "series_id": series_id,
+                "number": number,
+                "cached": True,
+                "model_calls": 0,
+                "status": "ready",
+                "final": manifest.get("final"),
+            }
+
+        return jobs.start_or_rejoin(
+            "episode", replay_episode_worker,
+            dedupe_key=("demo-episode", series_id, number),
+            series_id=series_id, number=number,
+            steps=["script", "voices", "cinematic"],
+        )
     try:
         return episode_service.start_episode_job(
             series_id, number, force_script=force_script)
@@ -422,6 +459,22 @@ def save_confirmations(series_id: str, body: ConfirmationBody) -> dict:
 @router.post("/series/{series_id}/analysis/regenerate", status_code=202)
 def regenerate_analysis(series_id: str) -> dict:
     _require(series_id)
+    if demo_replay.is_replay(series_id):
+        def replay_worker(handle: jobs.JobHandle) -> dict:
+            handle.step("analysis", "Loading cached story analysis")
+            handle.progress(1, 3, "Restoring genre and theme graphs")
+            time.sleep(config.DEMO_REPLAY_STEP_DELAY_SEC)
+            handle.progress(2, 3, "Restoring episode and character assets")
+            time.sleep(config.DEMO_REPLAY_STEP_DELAY_SEC)
+            demo_replay.complete(series_id)
+            handle.progress(3, 3, "Cached series ready")
+            return {"series_id": series_id, "cached": True, "model_calls": 0}
+
+        return jobs.start_or_rejoin(
+            "analysis", replay_worker,
+            dedupe_key=("demo-analysis", series_id),
+            series_id=series_id, steps=["analysis"],
+        )
     try:
         return story_service.start_analysis_job(series_id)
     except jobs.QueueFullError as exc:

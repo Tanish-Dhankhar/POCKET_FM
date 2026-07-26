@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from . import config, jobs, store
+from . import config, demo_replay, jobs, store
 from .api_store import router as store_router
 from .graph import GRAPH
 from .state import new_state
@@ -123,6 +123,10 @@ def _snapshot(series_id: str) -> dict:
 @app.post("/series")
 def create_series(body: NewSeries) -> dict:
     series_id = uuid.uuid4().hex[:12]
+    if demo_replay.matches(body.idea):
+        demo_replay.seed(series_id, body.idea, transcript=body.transcript)
+        time.sleep(config.DEMO_REPLAY_STEP_DELAY_SEC)
+        return demo_replay.response(series_id, "extract")
     # Seed the folder before the first LLM call so the series exists on disk
     # even if generation fails partway.
     store.save_idea(series_id, body.idea, transcript=body.transcript)
@@ -133,6 +137,18 @@ def create_series(body: NewSeries) -> dict:
 
 @app.get("/series/{series_id}/state")
 def get_state(series_id: str) -> dict:
+    if demo_replay.is_replay(series_id):
+        values = store.hydrate(series_id)
+        stage = demo_replay.current_stage(series_id)
+        return {
+            "series_id": series_id,
+            "stage": stage,
+            "approvals": {},
+            "awaiting_review": stage != "episode_ready",
+            "demo_replay": True,
+            "model_calls": 0,
+            "state": values,
+        }
     values = _snapshot(series_id)
     snap = GRAPH.get_state(_cfg(series_id))
     pending = snap.tasks and any(t.interrupts for t in snap.tasks)
@@ -146,6 +162,8 @@ def get_state(series_id: str) -> dict:
 
 
 def _resume(series_id: str, cmd: Command_) -> dict:
+    if demo_replay.is_replay(series_id):
+        return demo_replay.resume(series_id, cmd.action, cmd.data)
     _snapshot(series_id)  # 404 if unknown
     # Creator-supplied data arrives with the command rather than from a node, so
     # persist the pieces the folder owns before handing back to the graph.

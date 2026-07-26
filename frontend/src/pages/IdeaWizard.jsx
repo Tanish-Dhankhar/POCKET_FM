@@ -55,6 +55,7 @@ export default function IdeaWizard({ mode }) {
       const card = result.confirm || {}
       wizard.set({
         seriesId:result.seriesId, questions:result.questions, answers,
+        demoReplay:Boolean(result.demoReplay),
         confirm:{title:card.title || '',genre:card.genre || '',setting:card.setting || '',include_narrator:Boolean(card.narrator_suggested),ep_count:card.recommended_ep_count || 6,ep_minutes:card.recommended_ep_minutes || 10,genre_tags:card.genre_tags || [],theme_tags:card.theme_tags || []},
       })
       if (wizard.sourceBlob) studio.uploadInputAudio(result.seriesId,wizard.sourceBlob).catch(() => {})

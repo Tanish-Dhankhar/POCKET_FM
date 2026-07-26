@@ -21,6 +21,7 @@ export async function startSeries({ idea, transcript = null }) {
     seriesId: extracted.series_id,
     questions: clarified.payload?.questions || [],
     confirm,
+    demoReplay: Boolean(extracted.demo_replay || clarified.demo_replay),
   }
 }
 

@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import * as studio from '../api/studio'
 import GenerationLoader from '../components/GenerationLoader'
 import PocketLogo from '../components/PocketLogo'
+import StoryPlotChart from '../components/StoryPlotChart'
 import { joinEmotion, splitEmotion } from '../lib/format'
 
 const emotions = ['Calm', 'Curious', 'Whisper', 'Fear', 'Panic', 'Anger', 'Relief', 'Joy', 'Sad', 'Excited', 'Nervous', 'Serious', 'Sarcastic', 'Tender', 'Shouting', 'Trembling', 'Pleading', 'Cold', 'Amused', 'Determined']
@@ -207,6 +208,7 @@ export default function Episode() {
             {Array.isArray(outline.main_events) && outline.main_events.length > 0 && <ul>{outline.main_events.map((event, index) => <li key={index}>{event}</li>)}</ul>}
             {outline.cliffhanger && <div className="outline-cliff"><strong>Cliffhanger</strong><span>{outline.cliffhanger}</span></div>}
           </section>
+          <StoryPlotChart plot={evaluation.story_plot} lineCount={lines.length} stale={evaluation.stale} />
           <section>
             <div className="judge-head"><p className="card-label">Editorial notes</p><button type="button" disabled={evaluate.isPending || !lines.length} onClick={() => evaluate.mutate()}><Sparkles size={13} /> {evaluate.isPending ? 'Reviewing…' : points.length ? 'Refresh' : 'Review'}</button></div>
             {evaluation.stale && <p className="stale-note">These notes refer to an earlier script version.</p>}

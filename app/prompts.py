@@ -351,7 +351,7 @@ def story_analysis(blueprint: dict[str, Any], genre_tags: list[str],
         "Classify the genre across exactly these seven categories: action, drama, "
         "comedy, sci_fi, horror, thriller, romance. Values must total exactly 100. "
         "Return exactly four genre tags and exactly four weighted theme tags; theme "
-        "percentages must also total exactly 100. Preserve creator-confirmed tags "
+        "score higher each out of 100. Preserve creator-confirmed tags "
         "when they fit the blueprint.\n\n"
         f"CONFIRMED GENRE TAGS: {_json(genre_tags)}\n"
         f"CONFIRMED THEME TAGS: {_json(theme_tags)}\n"
@@ -389,7 +389,8 @@ def emotional_curve(blueprint: dict[str, Any], episodes: list[dict[str, Any]],
         f"GENRE: {blueprint.get('genre', '')}\n"
         f"THEME: {blueprint.get('theme', '')}\n"
         f"MAIN STORYLINE: {blueprint.get('main_storyline', '')}\n\n"
-        f"EPISODES (number. title — summary (emotional focus; cliffhanger)):\n{numbered}"
+        f"EPISODES (number. title — summary (emotional focus; cliffhanger)):\n{numbered}\n\n"
+        f"EPISODE DATA:\n{_json(episodes)}"
         + _feedback_block(instruction)
     )
 
@@ -397,14 +398,23 @@ def emotional_curve(blueprint: dict[str, Any], episodes: list[dict[str, Any]],
 def episode_evaluation(blueprint: dict[str, Any], outline: dict[str, Any],
                        script_lines: list[dict[str, Any]]) -> str:
     return (
-        "Act as a concise audio-fiction script evaluator. Return 3-6 actionable points. "
+        "Act as a concise audio-fiction script evaluator. Return 3-6 actionable points "
+        "and a story_plot derived from the actual script. "
         "Cover the opening hook, distinct character voices, pacing and repetition, "
         "emotional escalation, clarity without visuals, and cliffhanger strength where "
         "relevant. For every point provide a short category, an honest assessment, and "
         "one concrete suggestion. Do not praise generically or rewrite the script.\n\n"
+        "For story_plot, identify 5-8 ordered dramatic beats that span the complete "
+        "episode, including the opening and final turn. Give each beat a short label, "
+        "the exact 0-based script line_index where it lands, a 0-100 dramatic intensity, "
+        "and one concise description grounded in what happens there. Shape the values "
+        "like the real dramatic pulse: preserve meaningful dips, reversals, escalation, "
+        "climax, and cliffhanger instead of drawing a mechanical upward slope. Name the "
+        "overall structure and summarize the curve in one sentence.\n\n"
         f"SERIES BLUEPRINT:\n{_json(blueprint)}\n\n"
         f"EPISODE OUTLINE:\n{_json(outline)}\n\n"
-        f"SCRIPT:\n{_json(script_lines)}"
+        f"SCRIPT ({len(script_lines)} lines, indexed 0-{max(0, len(script_lines) - 1)}):\n"
+        f"{_json(script_lines)}"
     )
 
 

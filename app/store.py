@@ -262,6 +262,7 @@ def load_blueprint(series_id: str) -> dict[str, Any]:
     plot = read_json(d / "plot.json", {}) or {}
     theme = read_json(d / "theme.json", {}) or {}
     genre = read_json(d / "genre.json", {}) or {}
+    swot = read_json(d / "swot.json", {}) or {}
     return {
         "logline": plot.get("logline", ""),
         "story_world": plot.get("story_world", ""),
@@ -274,10 +275,54 @@ def load_blueprint(series_id: str) -> dict[str, Any]:
         "genre_tags": genre.get("tags", []),
         "setting": genre.get("setting", ""),
         "language": genre.get("language", ""),
+        "genre_data": genre,
+        "theme_data": theme,
+        "swot": swot,
         "emotional_curve": load_emotional_curve(series_id),
         "characters": load_characters(series_id),
-        "emotional_curve": load_emotional_curve(series_id),
     }
+
+
+def save_story_analysis(series_id: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    """Persist the SWOT plus the chart-ready genre and theme breakdowns."""
+    d = blueprint_dir(series_id)
+    revision = int(load_index(series_id).get("revision", 1) or 1)
+    generated_at = _now()
+
+    swot = {
+        key: list(analysis.get(key) or [])
+        for key in ("strengths", "weaknesses", "opportunities", "threats")
+    }
+    swot.update({
+        "source_revision": revision,
+        "generated_at": generated_at,
+        "stale": False,
+    })
+    write_json(d / "swot.json", swot)
+
+    genre = read_json(d / "genre.json", {}) or {}
+    genre.update({
+        "description": analysis.get("genre_description", ""),
+        "tags": list(analysis.get("genre_tags") or genre.get("tags") or []),
+        "distribution": dict(analysis.get("genre_distribution") or {}),
+        "source_revision": revision,
+        "generated_at": generated_at,
+        "stale": False,
+    })
+    write_json(d / "genre.json", genre)
+
+    theme = read_json(d / "theme.json", {}) or {}
+    weighted_themes = list(analysis.get("themes") or [])
+    theme.update({
+        "description": analysis.get("theme_description", ""),
+        "tags": weighted_themes or theme.get("tags") or [],
+        "distribution": weighted_themes,
+        "source_revision": revision,
+        "generated_at": generated_at,
+        "stale": False,
+    })
+    write_json(d / "theme.json", theme)
+    return {"swot": swot, "genre_data": genre, "theme_data": theme}
 
 
 # --------------------------------------------------------------------------- #

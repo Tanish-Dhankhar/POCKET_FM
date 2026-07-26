@@ -149,6 +149,12 @@ def evaluate_episode(series_id: str, number: int) -> dict[str, Any]:
         task="episode_evaluation",
         system=prompts.SYSTEM,
     ).model_dump()
+    plot = result.get("story_plot", {})
+    plot_points = plot.get("points", [])
+    last_line = max(0, len(lines) - 1)
+    for point in plot_points:
+        point["line_index"] = min(last_line, max(0, int(point.get("line_index", 0))))
+    plot["points"] = sorted(plot_points, key=lambda point: point["line_index"])
     result.update({
         "script_hash": _script_hash(lines),
         "generated_at": store._now(),

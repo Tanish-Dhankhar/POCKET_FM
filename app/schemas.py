@@ -366,8 +366,37 @@ class EvaluationPoint(BaseModel):
     suggestion: str
 
 
+class StoryPlotPoint(BaseModel):
+    label: str = Field(description="short story-beat label, ideally 1-3 words")
+    line_index: int = Field(
+        ge=0,
+        description="0-based script-line index where this beat lands",
+    )
+    intensity: int = Field(
+        ge=0, le=100,
+        description="overall dramatic intensity at this point in the episode",
+    )
+    description: str = Field(
+        description="one concise, script-grounded explanation of the beat",
+    )
+
+
+class StoryPlot(BaseModel):
+    structure: str = Field(
+        description="short name for the episode's dramatic shape or structure",
+    )
+    summary: str = Field(
+        description="one sentence explaining how the story rises and falls",
+    )
+    points: list[StoryPlotPoint] = Field(
+        min_length=5, max_length=8,
+        description="ordered story beats spanning the opening through the final line",
+    )
+
+
 class EpisodeEvaluation(BaseModel):
     points: list[EvaluationPoint] = Field(min_length=3, max_length=6)
+    story_plot: StoryPlot
 
 
 # ---------------------------------------------------------------------------

@@ -311,8 +311,8 @@ export default function Ideaboard() {
         {/* Page title */}
         <div className="mb-6 flex flex-col items-center justify-center text-center">
           <h1 className="flex items-center justify-center gap-3 text-4xl sm:text-5xl md:text-6xl">
-            <span className="ideaboard-title-idea text-[1.15em] tracking-[-0.05em] text-white uppercase">Idea</span>
-            <span className="ideaboard-title-board text-[1.15em] tracking-[-0.05em] text-[#E61C38] uppercase">BOARD</span>
+            <span className="ideaboard-title-idea text-[1.15em] tracking-[-0.05em] text-white uppercase"><span className="ideaboard-title-one">1</span>DEA</span>
+            <span className="ideaboard-title-board text-[1.15em] tracking-[-0.05em] text-[#E61C38] uppercase">B<span className="ideaboard-title-board-o">O</span>ARD</span>
           </h1>
           <p className="mt-2 font-mono text-sm font-bold text-neutral-500">
             {index.title || bp.logline || 'Untitled series'}

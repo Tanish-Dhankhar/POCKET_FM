@@ -38,6 +38,15 @@ CORS_ORIGINS = [
     o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()
 ]
 
+# Narrow, exact-input replay used for the hackathon presentation. Normal ideas
+# never enter this path and continue to use the live graph/model pipeline.
+DEMO_REPLAY_ENABLED = os.environ.get("DEMO_REPLAY_ENABLED", "true").strip().lower() in (
+    "1", "true", "yes",
+)
+DEMO_REPLAY_STEP_DELAY_SEC = max(
+    0.0, float(os.environ.get("DEMO_REPLAY_STEP_DELAY_SEC", "1.20"))
+)
+
 # ---------------------------------------------------------------------------
 # Databricks (optional dual-write mirror — see app/databricks_store.py)
 # ---------------------------------------------------------------------------
@@ -68,6 +77,12 @@ TEXT_MODEL_EASY = os.environ.get("OPENAI_EASY_MODEL", "gpt-5.6-luna")
 TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.1-flash-lite")
 TRANSCRIPTION_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
+TTS_OPENAI_FALLBACK_ENABLED = os.environ.get(
+    "TTS_OPENAI_FALLBACK_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes")
+TTS_OPENAI_FALLBACK_MODEL = os.environ.get(
+    "TTS_OPENAI_FALLBACK_MODEL", "gpt-4o-mini-tts"
+)
 
 # Reasoning and model selection are deliberately separate.  Every production
 # text call names one route below, making its Luna/Sol assignment auditable.

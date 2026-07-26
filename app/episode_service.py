@@ -51,7 +51,7 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
         return {"cancelled": True, "step": "script"}
 
     # --- 2. editorial evaluation ------------------------------------------
-    handle.step("evaluate", "Evaluating the episode script")
+    handle.step("evaluate", "Mapping the story plot and evaluating the script")
     story_service.evaluate_episode(series_id, number)
 
     if handle.cancelled():

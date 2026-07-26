@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 import threading
 import time
 import uuid
@@ -185,6 +186,50 @@ def _write_wav(path: Path, pcm: bytes) -> None:
         wf.writeframes(pcm)
 
 
+_OPENAI_VOICES = {
+    "Achernar": "coral",
+    "Algenib": "onyx",
+    "Gacrux": "shimmer",
+    "Leda": "nova",
+    "Charon": "echo",
+}
+_EMOTION_PREFIX = re.compile(r"^\[([^]]+)\]\s*")
+
+
+def _write_openai_fallback(path: Path, text: str, voice_id: str) -> None:
+    """Write a WAV through OpenAI only after the primary provider exhausts retries."""
+    if not (config.TTS_OPENAI_FALLBACK_ENABLED and config.OPENAI_API_KEY):
+        raise RuntimeError("OpenAI TTS fallback is disabled or not configured")
+    match = _EMOTION_PREFIX.match(text)
+    emotion = match.group(1) if match else "natural"
+    spoken_text = text[match.end():] if match else text
+    from openai import OpenAI
+    response = OpenAI(
+        api_key=config.OPENAI_API_KEY,
+        timeout=60,
+    ).audio.speech.create(
+        model=config.TTS_OPENAI_FALLBACK_MODEL,
+        voice=_OPENAI_VOICES.get(voice_id, "alloy"),
+        input=spoken_text,
+        instructions=(
+            "Naturalistic cinematic audio-drama performance. "
+            f"Delivery: {emotion}. Keep it intimate and emotionally truthful. "
+            "Speak exactly the supplied words; do not add an introduction."
+        ),
+        response_format="wav",
+    )
+    response.write_to_file(path)
+
+
+def _render_uncached(text: str, voice_id: str, out_path: Path) -> None:
+    try:
+        _write_wav(out_path, _synthesize(text, voice_id))
+    except Exception:
+        if not (config.TTS_OPENAI_FALLBACK_ENABLED and config.OPENAI_API_KEY):
+            raise
+        _write_openai_fallback(out_path, text, voice_id)
+
+
 def _cache_lock(key: str) -> threading.Lock:
     return _cache_locks[int(key[:8], 16) % len(_cache_locks)]
 
@@ -215,7 +260,7 @@ def render_line(text: str, voice_id: str, out_path: str | Path,
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if cache_dir is None:
-        _write_wav(out_path, _synthesize(text, voice_id))
+        _render_uncached(text, voice_id, out_path)
         return out_path
 
     cache_dir = Path(cache_dir)
@@ -226,6 +271,6 @@ def render_line(text: str, voice_id: str, out_path: str | Path,
     with _cache_lock(key):
         if _copy_cached(cached, out_path):
             return out_path
-        _write_wav(out_path, _synthesize(text, voice_id))
+        _render_uncached(text, voice_id, out_path)
         _store_cached(out_path, cached)
     return out_path

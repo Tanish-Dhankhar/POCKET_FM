@@ -186,11 +186,24 @@ class FakeLLM:
         )
 
     def _EpisodeEvaluation(self, prompt):
-        return schemas.EpisodeEvaluation(points=[
-            schemas.EvaluationPoint(category="Hook", assessment="Immediate tension.", suggestion="Keep the first sound unexplained."),
-            schemas.EvaluationPoint(category="Pacing", assessment="Middle is clear.", suggestion="Trim one repeated exchange."),
-            schemas.EvaluationPoint(category="Cliffhanger", assessment="Strong final image.", suggestion="End on the door sound."),
-        ])
+        return schemas.EpisodeEvaluation(
+            points=[
+                schemas.EvaluationPoint(category="Hook", assessment="Immediate tension.", suggestion="Keep the first sound unexplained."),
+                schemas.EvaluationPoint(category="Pacing", assessment="Middle is clear.", suggestion="Trim one repeated exchange."),
+                schemas.EvaluationPoint(category="Cliffhanger", assessment="Strong final image.", suggestion="End on the door sound."),
+            ],
+            story_plot=schemas.StoryPlot(
+                structure="Escalating mystery",
+                summary="A quiet question rises through doubt and lands on a supernatural reveal.",
+                points=[
+                    schemas.StoryPlotPoint(label="Unease", line_index=0, intensity=28, description="Maya tests the silence."),
+                    schemas.StoryPlotPoint(label="Denial", line_index=1, intensity=20, description="Benji dismisses the sound."),
+                    schemas.StoryPlotPoint(label="Signal", line_index=2, intensity=48, description="The voice becomes personal."),
+                    schemas.StoryPlotPoint(label="Turn", line_index=3, intensity=67, description="The evidence changes their options."),
+                    schemas.StoryPlotPoint(label="Reveal", line_index=4, intensity=92, description="The final beat confirms the threat."),
+                ],
+            ),
+        )
 
     def _EpisodeConfigSuggestion(self, prompt):
         return schemas.EpisodeConfigSuggestion(
