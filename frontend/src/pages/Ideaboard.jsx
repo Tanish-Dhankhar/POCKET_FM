@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Check, ChevronDown, Pencil, Sparkles, UserRound, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Loader2, Pencil, RefreshCw, Sparkles, UserRound, X } from 'lucide-react'
 import PocketLogo from '../components/PocketLogo'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -8,6 +8,7 @@ import AILoadingScreen from '../components/AILoadingScreen'
 import IdeaRefiningLoader from '../components/IdeaRefiningLoader'
 import GenreRadar from '../components/GenreRadar'
 import ThemeBars from '../components/ThemeBars'
+import EmotionalCurveChart from '../components/EmotionalCurveChart'
 import VoicePicker from '../components/VoicePicker'
 import { characterKey } from '../lib/format'
 
@@ -144,6 +145,8 @@ export default function Ideaboard() {
   const [refinePrompt, setRefinePrompt] = useState('')
   const [episodeJob, setEpisodeJob] = useState(null)
   const [analysisJob, setAnalysisJob] = useState(null)
+  const [curveJob, setCurveJob] = useState(null)
+  const [curveError, setCurveError] = useState('')
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['series', id],
@@ -175,6 +178,11 @@ export default function Ideaboard() {
     mutationFn: () => studio.regenerateAnalysis(id),
     onSuccess: (job) => setAnalysisJob(job.id),
   })
+  const regenerateCurve = useMutation({
+    mutationFn: () => studio.regenerateEmotionalCurve(id),
+    onSuccess: (job) => { setCurveError(''); setCurveJob(job.id) },
+    onError: (err) => setCurveError(err.message || 'Could not start emotional curve generation.'),
+  })
 
   const episodeJobQuery = useQuery({
     queryKey: ['job', episodeJob?.id],
@@ -186,6 +194,12 @@ export default function Ideaboard() {
     queryKey: ['job', analysisJob],
     queryFn: () => studio.getJob(analysisJob),
     enabled: Boolean(analysisJob),
+    refetchInterval: (query) => ['done', 'error'].includes(query.state.data?.state) ? false : 1000,
+  })
+  const curveQuery = useQuery({
+    queryKey: ['job', curveJob],
+    queryFn: () => studio.getJob(curveJob),
+    enabled: Boolean(curveJob),
     refetchInterval: (query) => ['done', 'error'].includes(query.state.data?.state) ? false : 1000,
   })
 
@@ -205,6 +219,17 @@ export default function Ideaboard() {
   }, [analysisQuery.data?.state, id, queryClient])
 
   useEffect(() => {
+    const state = curveQuery.data?.state
+    if (state === 'done') {
+      queryClient.invalidateQueries({ queryKey: ['series', id] })
+      setCurveJob(null)
+    } else if (state === 'error') {
+      setCurveError(curveQuery.data?.error || 'Emotional curve generation failed.')
+      setCurveJob(null)
+    }
+  }, [curveQuery.data?.state, curveQuery.data?.error, id, queryClient])
+
+  useEffect(() => {
     if (activeCharacter) setCharacterDraft({ ...activeCharacter })
   }, [activeCharacter])
 
@@ -212,6 +237,9 @@ export default function Ideaboard() {
   const genre = bp.genre_data || {}
   const theme = bp.theme_data || {}
   const swot = bp.swot || {}
+  const curve = bp.emotional_curve || {}
+  const curveBusy = regenerateCurve.isPending || Boolean(curveJob)
+  const hasCurve = Boolean(curve.points?.length)
   const episodes = data?.episodes || []
   const characters = data?.characters || []
   const index = data?.index || {}
@@ -676,6 +704,57 @@ export default function Ideaboard() {
           </div>
           <div className="w-full lg:w-2/3 theme-bars" style={{ borderLeft: '1px solid #222', padding: '30px 20px' }}>
             <ThemeBars themes={themeLabels} />
+
+            {/* Emotional curve — top-3 tracked emotions across the episode plan */}
+            <div className="mt-8 border-t border-neutral-800 pt-6">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] font-bold tracking-[0.18em] text-neutral-500 uppercase">
+                  Emotional Curve · Full Plot
+                </p>
+                <button
+                  type="button"
+                  onClick={() => regenerateCurve.mutate()}
+                  disabled={curveBusy}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-semibold tracking-wide text-neutral-400 transition-colors hover:text-[#E61C38] disabled:opacity-50"
+                >
+                  {curveBusy ? (
+                    <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2.25} />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" strokeWidth={2.25} />
+                  )}
+                  {curveBusy ? 'Charting…' : hasCurve ? 'Regenerate' : 'Generate'}
+                </button>
+              </div>
+              {hasCurve && curve.stale && !curveBusy && (
+                <p className="mt-2 text-[11px] text-amber-400">
+                  The story changed since this arc was charted — regenerate to refresh it.
+                </p>
+              )}
+              {curveError && (
+                <p className="mt-2 text-[11px] text-red-400">{curveError}</p>
+              )}
+              <div className="mt-3">
+                {curveBusy && !hasCurve ? (
+                  <div className="flex h-44 w-full items-center justify-center gap-2 text-xs text-neutral-500">
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                    Charting the emotional arc…
+                  </div>
+                ) : hasCurve ? (
+                  <EmotionalCurveChart
+                    idPrefix="theme-plot-curve"
+                    emotions={curve.emotions}
+                    points={curve.points}
+                  />
+                ) : (
+                  <div className="flex h-44 w-full items-center justify-center text-xs text-neutral-600">
+                    No emotional arc charted yet — generate one from the episode plan.
+                  </div>
+                )}
+              </div>
+              {hasCurve && curve.summary && (
+                <p className="mt-3 text-xs leading-5 text-neutral-500">{curve.summary}</p>
+              )}
+            </div>
           </div>
         </div>
       </Modal>

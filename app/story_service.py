@@ -56,6 +56,53 @@ def start_analysis_job(series_id: str, instruction: str = "") -> dict[str, Any]:
     return jobs.get(job_id) or {"id": job_id}
 
 
+def _emotional_curve_input(series_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    bp = store.load_blueprint(series_id)
+    blueprint = {
+        "genre": bp.get("genre", ""),
+        "theme": bp.get("theme", ""),
+        "main_storyline": bp.get("main_storyline", ""),
+    }
+    episodes = [
+        {
+            "number": outline.get("number"),
+            "title": outline.get("title", ""),
+            "summary": outline.get("summary", ""),
+            "emotional_focus": outline.get("emotional_focus", ""),
+            "cliffhanger": outline.get("cliffhanger", ""),
+        }
+        for outline in store.load_outlines(series_id)
+    ]
+    return blueprint, episodes
+
+
+def generate_emotional_curve(series_id: str, instruction: str = "") -> dict[str, Any]:
+    blueprint, episodes = _emotional_curve_input(series_id)
+    if not episodes:
+        raise ValueError("generate the episode plan before building an emotional curve")
+    result = generate_structured(
+        prompts.emotional_curve(blueprint, episodes, instruction),
+        schemas.EmotionCurve,
+        thinking=config.THINK_HIGH,
+        system=prompts.SYSTEM,
+    )
+    return store.save_emotional_curve(series_id, result.model_dump(), episodes)
+
+
+def start_emotional_curve_job(series_id: str, instruction: str = "") -> dict[str, Any]:
+    def worker(handle: jobs.JobHandle) -> dict[str, Any]:
+        handle.step("emotional_curve", "Charting the emotional arc across episodes")
+        result = generate_emotional_curve(series_id, instruction)
+        handle.progress(1, 1, "Emotional curve ready")
+        return {"series_id": series_id, "emotional_curve": result}
+
+    return jobs.start_or_rejoin(
+        "emotional_curve", worker,
+        dedupe_key=("emotional_curve", series_id),
+        series_id=series_id, steps=["emotional_curve"],
+    )
+
+
 def _script_hash(lines: list[dict[str, Any]]) -> str:
     payload = json.dumps(lines, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
