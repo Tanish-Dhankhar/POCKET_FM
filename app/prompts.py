@@ -80,7 +80,8 @@ def confirm_card(idea: str, extracted: dict[str, Any], answers: list[dict]) -> s
         "Say whether the story genuinely benefits from a NARRATOR voice (true only if "
         "it needs scene-setting or interior perspective that dialogue can't carry). "
         "Recommend a focused first-season episode count and an average episode length "
-        "in minutes (5-15).\n\n"
+        "in minutes (5-15). Generate exactly four short GENRE TAGS and exactly four "
+        "short THEME TAGS grounded in this specific story. Avoid generic filler.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
         f"EXTRACTED METADATA:\n{json.dumps(extracted, indent=2)}\n\n"
         f"CREATOR'S ANSWERS:\n{json.dumps(answers, indent=2)}"
@@ -103,9 +104,11 @@ def blueprint(idea: str, extracted: dict[str, Any], answers: list[dict],
     return (
         "Write the complete SERIES BLUEPRINT — the foundation for the whole show.\n\n"
         "Include: a sharp logline, the story world and its rules, the overall main "
-        "storyline (with the potential to run for many episodes), the tone and theme, "
-        "and a full character roster. For every character give personality, "
-        "relationships, and a distinct VOCAL SIGNATURE (pace, pitch, verbal tics) so "
+        "storyline, 3-6 major story beats (with the potential to run for many episodes), "
+        "the tone and theme, "
+        "and a full character roster. For every character give personality, useful "
+        "details, physical persona, backstory, relationships, and a distinct VOCAL "
+        "SIGNATURE and VOCAL DIRECTION (pace, pitch, verbal tics) so "
         "voices are instantly distinguishable in audio. Mark exactly one character as "
         "the narrator ONLY if the story benefits from narration.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
@@ -174,11 +177,12 @@ def script(blueprint: dict[str, Any], episode: dict[str, Any],
         "tension. Keep 2-4 speaking characters in any given scene. Open with a hook in "
         "the first moments and land the episode's cliffhanger at the end.\n\n"
         + narrator_rule +
-        "EMOTION — use SPARINGLY. Put an inline emotion tag at the START of a line's "
-        "text ONLY when the emotion genuinely peaks or changes (a reveal, threat, "
-        "breakdown). Most lines should have NO tag and read in a natural voice. Aim for "
-        "at most roughly one tagged line in every three or four. Allowed tags only: "
-        f"{tag_list}. You may also use [pause].\n\n"
+        "EMOTION — use SPARINGLY. Store delivery direction in the separate `emotion` "
+        "field and keep `text` free of inline emotion prefixes. Use emotion=null for "
+        "natural delivery. Only set it when delivery differs materially from the "
+        "speaker's established voice, and never repeat it mechanically on adjacent "
+        f"lines. Allowed values only: {tag_list}. Use [pause] within text only for an "
+        "intentional silence, never as a default emotion.\n\n"
         "SOUND — keep it sparse. Leave 'sfx' as [] and 'music' as null for most lines. "
         "Only add an sfx hint for a concrete event the text mentions (thunder, door, "
         "footsteps). Only set 'music' (a mood word) on the FIRST line of a scene whose "
@@ -211,23 +215,175 @@ def voice_cast(characters: list[dict[str, Any]], feedback: str = "") -> str:
 # ---------------------------------------------------------------------------
 def sound_design(episode_lines: list[dict[str, Any]],
                  music_moods: list[str], sfx_keys: list[str],
-                 feedback: str = "") -> str:
+                 feedback: str = "",
+                 line_durations_ms: list[int] | dict[int, int] | None = None) -> str:
+    def duration_for(index: int) -> int | None:
+        if isinstance(line_durations_ms, dict):
+            value = line_durations_ms.get(index)
+        elif line_durations_ms is not None and index < len(line_durations_ms):
+            value = line_durations_ms[index]
+        else:
+            value = None
+        return int(value) if value is not None else None
+
+    def line_description(index: int, line: dict[str, Any]) -> str:
+        duration = duration_for(index)
+        timing = f" [rendered={duration}ms]" if duration is not None else ""
+        hints = []
+        if line.get("music"):
+            hints.append(f"music={line['music']}")
+        if line.get("sfx"):
+            hints.append("sfx=" + ",".join(str(v) for v in line["sfx"]))
+        hint_text = f" [script hints: {'; '.join(hints)}]" if hints else ""
+        return (
+            f"{index}: ({line.get('type')}) {line.get('speaker')}: "
+            f"{line.get('text')}{timing}{hint_text}"
+        )
+
     numbered = "\n".join(
-        f"{i}: ({ln.get('type')}) {ln.get('speaker')}: {ln.get('text')}"
+        line_description(i, ln)
         for i, ln in enumerate(episode_lines)
     )
     return (
-        "Design SPARSE, tasteful sound for this episode. You choose optional music "
-        "beds (each spanning a line range) and optional one-shot SFX (each on a single "
-        "line).\n\n"
+        "Act as a restrained audio-drama editor. The speech WAV for every non-empty "
+        "line has ALREADY been rendered exactly once; use its measured duration below. "
+        "Return one SoundPlan that edits those immutable takes and designs the sound. "
+        "Do not rewrite dialogue and do not request another performance.\n\n"
+        "DIALOGUE EDITS:\n"
+        "- For every spoken line, choose natural pause_before_ms, pause_after_ms, rate, "
+        "gain_db, overlap_previous_ms, and interrupt. Use line as the 0-based index.\n"
+        f"- Defaults are pause_before=0, pause_after={config.PAUSE_BETWEEN_LINES_MS}, "
+        "rate=1.0, gain=0, overlap=0.\n"
+        "- Keep rate in 0.90-1.10, gain in -8..+4 dB, each pause in 0..2500 ms, and "
+        "overlap in 0..600 ms. Most lines should stay close to their defaults.\n"
+        "- overlap_previous_ms starts this line before the previous spoken line ends. "
+        "Set interrupt=true only for a deliberate cut-off; otherwise use very short "
+        "overlap for a natural latch/reaction. Protect important words and clarity.\n"
+        "- trim_tail_ms is normally 0. Only for an unmistakable scripted interruption, "
+        "it may remove up to 1500 ms from the interrupted take so the sentence truly "
+        "stops mid-thought. Pair a hard cut with fade_out_ms=5..15 to prevent a click; "
+        "do not use a long fade on speech.\n"
+        "- Arguments may be tighter, emotional beats may breathe, and narration should "
+        "normally remain clear rather than overlap important dialogue.\n"
+        "- The result should feel actively directed, not like serial TTS. When the script "
+        "contains a clear two-character argument, urgent exchange, comic retort, or "
+        "interruption, normally give one suitable response 120-300 ms of true overlap. "
+        "Do not force overlap into narration, monologues, or a reply that needs a clean "
+        "dramatic beat.\n\n"
+        "SOUND DESIGN:\n"
+        "Choose optional music beds, one-shot SFX, and quiet ambience beds. Script hints "
+        "are evidence, not commands; map them only to exact allowed asset keys.\n\n"
         "Hard rules:\n"
         "- Silence is the default. Many scenes need NO music. Do not blanket the "
         "episode.\n"
         "- Music only on a clear mood scene; keep beds few and let them span whole "
-        "scenes, not single lines.\n"
-        "- SFX only for concrete events the line text actually mentions.\n"
+        "scenes, not single lines. Keep duck_under_dialogue=true unless masking is "
+        "explicitly intended. Start near duck_db=-10 with a smooth attack/hold/release; "
+        "use a deeper dip for whispers and a shallower one for sparse score. Use "
+        "conservative gain and fades.\n"
+        "- SFX only for concrete events the line text actually mentions. offset_ms is "
+        "relative to that line; keep gain and pan subtle.\n"
+        "- Ambience is optional and quiet. Use it only for a sustained environment and "
+        "select its name from the allowed SFX keys (for example rain, wind, birds, crowd).\n"
         "- Use ONLY these music moods: " + ", ".join(music_moods) + "\n"
-        "- Use ONLY these sfx keys: " + ", ".join(sfx_keys) + "\n\n"
-        f"EPISODE LINES (index: (type) speaker: text):\n{numbered}"
+        "- Use ONLY these SFX/ambience keys: " + ", ".join(sfx_keys) + "\n\n"
+        f"EPISODE LINES (index: (type) speaker: text and measured duration):\n{numbered}"
         + _feedback_block(feedback)
     )
+
+
+def story_analysis(blueprint: dict[str, Any], genre_tags: list[str],
+                   theme_tags: list[str], instruction: str = "") -> str:
+    return (
+        "Analyse this audio-series blueprint for its creator Ideaboard. Return a "
+        "concise literary SWOT with 2-4 points in each quadrant. Strengths and "
+        "weaknesses are qualities of the current story; opportunities are promising "
+        "directions; threats are risks such as repetition, unclear rules, or weak "
+        "audio-only comprehension.\n\n"
+        "Classify the genre across exactly these seven categories: action, drama, "
+        "comedy, sci_fi, horror, thriller, romance. Values should total roughly 100. "
+        "Return exactly four genre tags and exactly four weighted theme tags; theme "
+        "percentages should also total roughly 100. Preserve creator-confirmed tags "
+        "when they fit the blueprint.\n\n"
+        f"CONFIRMED GENRE TAGS: {json.dumps(genre_tags)}\n"
+        f"CONFIRMED THEME TAGS: {json.dumps(theme_tags)}\n"
+        f"BLUEPRINT:\n{json.dumps(blueprint, indent=2)}"
+        + _feedback_block(instruction)
+    )
+
+
+def episode_evaluation(blueprint: dict[str, Any], outline: dict[str, Any],
+                       script_lines: list[dict[str, Any]]) -> str:
+    return (
+        "Act as a concise audio-fiction script evaluator. Return 3-6 actionable points. "
+        "Cover the opening hook, distinct character voices, pacing and repetition, "
+        "emotional escalation, clarity without visuals, and cliffhanger strength where "
+        "relevant. For every point provide a short category, an honest assessment, and "
+        "one concrete suggestion. Do not praise generically or rewrite the script.\n\n"
+        f"SERIES BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
+        f"EPISODE OUTLINE:\n{json.dumps(outline, indent=2)}\n\n"
+        f"SCRIPT:\n{json.dumps(script_lines, indent=2)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Images — series thumbnail + character portraits
+# ---------------------------------------------------------------------------
+# These go to an image model, not a text model, so they read as a single visual
+# brief rather than an instruction + JSON schema.
+
+_NO_TEXT_RULE = (
+    "Absolutely no text, letters, numbers, logos, watermarks, captions, or title "
+    "cards anywhere in the image — the app overlays its own typography."
+)
+
+
+def thumbnail_image(index: dict[str, Any], blueprint: dict[str, Any]) -> str:
+    """Cover art for the series, driven by the story and its setting."""
+    def field(*keys: str) -> str:
+        for key in keys:
+            value = blueprint.get(key) or index.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    return (
+        "Cinematic vertical key art for a serialized audio-drama series.\n\n"
+        f"TITLE (do not draw it): {index.get('title', 'Untitled')}\n"
+        f"GENRE: {field('genre')}\n"
+        f"SETTING: {field('setting', 'story_world')}\n"
+        f"TONE: {field('tone')}\n"
+        f"THEME: {field('theme')}\n"
+        f"PREMISE: {field('logline')}\n"
+        f"STORY WORLD: {field('story_world')}\n\n"
+        "Compose it like a premium streaming poster: one strong focal subject or "
+        "location, dramatic directional lighting, deep atmospheric background, and a "
+        "colour palette that reads the genre instantly. Leave the lower third "
+        "visually calm so overlaid titling stays legible. Rich and moody rather than "
+        "bright and busy.\n\n"
+        f"{_NO_TEXT_RULE}"
+    )
+
+
+def character_image(character: dict[str, Any], blueprint: dict[str, Any]) -> str:
+    """Portrait of one character, driven by their physical appearance."""
+    appearance = (character.get("physical_persona")
+                  or character.get("description", ""))
+    return (
+        "Cinematic character portrait for a serialized audio-drama series.\n\n"
+        f"PHYSICAL APPEARANCE (the primary brief — follow it closely):\n{appearance}\n\n"
+        f"NAME: {character.get('name', '')}\n"
+        f"ROLE IN THE STORY: {character.get('role', '')}\n"
+        f"GENDER: {character.get('gender', 'Unspecified')}\n"
+        f"PERSONALITY (drives their expression and posture): "
+        f"{character.get('personality', '')}\n"
+        f"GENRE: {blueprint.get('genre', '')}\n"
+        f"SETTING (drives wardrobe, era, and lighting): "
+        f"{blueprint.get('setting') or blueprint.get('story_world', '')}\n\n"
+        "Head-and-shoulders framing, subject facing camera, shallow depth of field, "
+        "soft directional key light, muted background that suits the setting without "
+        "competing with the face. Photographic and grounded — a believable person, not "
+        "an illustration or a caricature. Exactly one person in frame.\n\n"
+        f"{_NO_TEXT_RULE}"
+    )
+

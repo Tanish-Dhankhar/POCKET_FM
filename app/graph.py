@@ -29,6 +29,7 @@ ALLOWED_EDIT_KEYS = {
     "clarification", "clarification_answers", "blueprint",
     "recommended_ep_count", "ep_count", "ep_minutes", "episodes",
     "scripts", "voice_cast", "sound_plans", "include_narrator",
+    "genre_tags", "theme_tags",
 }
 
 # Stages that are automatic (no human gate) — audio/mix just produce artifacts.

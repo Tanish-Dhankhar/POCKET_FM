@@ -1,14 +1,46 @@
-import { motion } from 'framer-motion'
-import { Link } from 'react-router-dom'
-import Header from '../components/Header'
+import { ArrowLeft, Mic2, PenLine } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+
+const choices = [
+  { path: '/new/write', icon: PenLine, label: 'Write' },
+  { path: '/new/mic', icon: Mic2, label: 'Speak' },
+]
 
 export default function NewSeries() {
-  return <div className="shell">
-    <Header />
-    <p className="eyebrow">New series</p><h1>How do you want to begin?</h1>
-    <div className="choice-grid" style={{ marginTop: 34 }}>
-      <motion.div whileHover={{ y: -5 }} transition={{ duration:.22 }}><Link className="choice" to="/new/write"><span className="choice-icon">Aa</span><h2>Write it</h2><p>Open a quiet editor and tell us the whole idea in your own words.</p></Link></motion.div>
-      <motion.div whileHover={{ y: -5 }} transition={{ duration:.22 }}><Link className="choice" to="/new/mic"><span className="choice-icon">●</span><h2>Speak it</h2><p>Record the idea naturally. We’ll transcribe it before building anything.</p></Link></motion.div>
-    </div>
-  </div>
+  const navigate = useNavigate()
+  return (
+    <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-black px-6">
+      <button
+        className="corner-back absolute left-6 top-6"
+        onClick={() => navigate('/')}
+      >
+        <ArrowLeft size={16} /> Dashboard
+      </button>
+
+      <p
+        className="mb-16 text-sm tracking-wide text-white/30"
+        style={{ fontFamily: "'JetBrains Mono', monospace" }}
+      >
+        I want to start a new story by...
+      </p>
+
+      <div className="flex items-end justify-center gap-20 md:gap-32">
+        {choices.map(({ path, icon: Icon, label }) => (
+          <button
+            key={path}
+            type="button"
+            onClick={() => navigate(path)}
+            className="group flex flex-col items-center gap-6 transition-all duration-300 hover:-translate-y-1"
+          >
+            <span className="flex items-end justify-center text-white/80 transition-colors duration-300 group-hover:text-white">
+              <Icon size={64} strokeWidth={1} />
+            </span>
+            <span className="text-sm font-normal tracking-wide text-white/60 transition-colors duration-300 group-hover:text-white/90">
+              {label}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
 }

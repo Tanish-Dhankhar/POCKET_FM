@@ -1,6 +1,6 @@
 ﻿# AI Creator Copilot — Backend Documentation
 
-> **Stack:** Python 3.13 · LangGraph · FastAPI · Gemini Flash-Lite (text) · Gemini Flash TTS (audio) · pydub
+> **Stack:** Python 3.13 · LangGraph · FastAPI · OpenAI GPT-5.6 (text) · Gemini Flash TTS (audio) · pydub
 > **Purpose:** Turn a single plain-text story idea into a complete, multi-voice, publish-ready audio series through a human-in-the-loop pipeline.
 
 ---
@@ -100,7 +100,7 @@ POCKET_FM/
 |   +-- __init__.py
 |   +-- main.py                # FastAPI app + all routes
 |   +-- config.py              # models, paths, audio tunables, voice catalogue
-|   +-- llm.py                 # Gemini text client + generate_structured()
+|   +-- llm.py                 # Routed OpenAI text client + structured output
 |   +-- tts.py                 # Gemini TTS client: render_line() + caching
 |   +-- state.py               # SeriesState TypedDict + new_state() factory
 |   +-- graph.py               # StateGraph wiring + GRAPH singleton
@@ -115,10 +115,10 @@ POCKET_FM/
 +-- tools/
 |   +-- __init__.py
 |   +-- smoke.py               # local drive-through test (no HTTP)
-|   +-- build_assets.py        # generates synthesised CC0 music+SFX placeholders
+|   +-- build_assets.py        # verifies/restores the licensed manifest pack
 +-- assets/
-|   +-- music/                 # mood beds: romantic.wav, horror.wav, ...
-|   +-- sfx/                   # one-shots: thunder.wav, rain.wav, ...
+|   +-- library/v2/music/      # licensed mood beds
+|   +-- library/v2/sfx/        # licensed one-shots and ambience
 |   +-- sound_manifest.json    # mood/key -> file + metadata
 +-- output/
     +-- <series_id>/
@@ -286,7 +286,7 @@ uvicorn app.main:app --reload
 | POST | /series/{id}/regenerate | {"note": "..."} | Regenerate the current stage with a guidance note. |
 | POST | /series/{id}/continue | {"plot": "..."} | Append a new continuation plot and re-run from blueprint. |
 | GET | /series/{id}/episodes/{n}/audio | - | Download epNN_final.wav (or _voices.wav if mixing not done). |
-| GET | /health | - | Returns {ok: true, text_model, tts_model}. |
+| GET | /health | - | Returns configured hard/easy text models, transcription model, and TTS model. |
 
 ### Response Shapes
 
@@ -329,7 +329,9 @@ uvicorn app.main:app --reload
 
 **File:** `app/llm.py`
 
-The Gemini client is lazily initialised from GEMINI_API_KEY (from .env). Two public functions:
+The OpenAI client is lazily initialised from `OPENAI_API_KEY`. High-effort calls
+route to Sol and low-effort calls route to Luna. Gemini remains responsible for
+microphone transcription and TTS.
 
 ### generate_text(prompt, thinking, system)
 Free-form text generation. Rarely used; nodes prefer structured output.
@@ -338,16 +340,16 @@ Free-form text generation. Rarely used; nodes prefer structured output.
 The primary function used by all text nodes.
 
 ```python
-cfg = types.GenerateContentConfig(
-    thinking_config=types.ThinkingConfig(thinking_level=thinking),
-    response_mime_type="application/json",
-    response_schema=schema,     # Pydantic class forces schema-conforming JSON
-    system_instruction=system,
+resp = openai_client().responses.parse(
+    model=model_for_thinking(thinking),
+    input=messages,
+    reasoning={"effort": thinking},
+    text_format=schema,
+    store=False,
 )
-resp = client().models.generate_content(model=TEXT_MODEL, contents=prompt, config=cfg)
 ```
 
-Falls back to `schema.model_validate(json.loads(resp.text))` if `resp.parsed` is not the right type. Every node always gets a validated Pydantic instance - no manual JSON parsing anywhere.
+Every node gets a validated Pydantic instance through native structured output.
 
 ### Thinking Levels Per Stage
 
@@ -515,12 +517,12 @@ The manifest is the closed vocabulary the LLM must choose from in sound_design. 
 ```json
 {
   "music": {
-    "romantic": {"file": "music/romantic.wav", "loopable": true, "keywords": ["love","tender"], "license": "CC0"},
-    "horror":   {"file": "music/horror.wav",   "loopable": true, "keywords": ["scary","dread"], "license": "CC0"}
+    "romantic": {"file": "library/v2/music/romantic_mixkit_659.mp3", "loopable": true, "keywords": ["love","tender"], "license": "Mixkit Stock Music Free License"},
+    "horror":   {"file": "library/v2/music/horror_mixkit_671.mp3",   "loopable": true, "keywords": ["scary","dread"], "license": "Mixkit Stock Music Free License"}
   },
   "sfx": {
-    "thunder": {"file": "sfx/thunder.wav", "keywords": ["lightning","storm"], "license": "CC0"},
-    "rain":    {"file": "sfx/rain.wav",    "keywords": ["rainfall","drizzle"], "license": "CC0"}
+    "thunder": {"file": "library/v2/sfx/thunder_mixkit_1297.wav", "keywords": ["lightning","storm"], "license": "Mixkit Sound Effects Free License"},
+    "rain":    {"file": "library/v2/sfx/rain_mixkit_2393.wav",    "keywords": ["rainfall","drizzle"], "license": "Mixkit Sound Effects Free License"}
   }
 }
 ```
@@ -531,13 +533,14 @@ romantic, emotional, hopeful, tense, horror, mystery, action, ambient
 ### SFX Keys (12 one-shots)
 thunder, rain, wind, footsteps, door_creak, birds, heartbeat, clock_tick, sword_clash, glass_break, crowd, phone_ring
 
-### Generating Placeholder Assets
+### Synchronising Licensed Assets
 
-WAV files in assets/ are synthesised placeholders (pure Python stdlib, no external deps). Real CC0 files can replace them at any time - the manifest paths still apply.
+The manifest records each source and direct download URL. The sync command keeps
+existing files by default and downloads only missing licensed assets.
 
 ```bash
 python -m tools.build_assets
-# Writes 8 music beds + 12 SFX + sound_manifest.json
+# Verifies 8 music beds + 15 SFX; restores missing files
 ```
 
 ### Sound Design Density Guardrails (_enforce in audio.py)
@@ -560,7 +563,9 @@ After the LLM picks cues, these Python rules are applied:
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| TEXT_MODEL | gemini-3.1-flash-lite | Gemini text model |
+| TEXT_MODEL_HARD | gpt-5.6-sol | Difficult creative and consistency-heavy work |
+| TEXT_MODEL_EASY | gpt-5.6-luna | Smaller, mechanical, or latency-sensitive work |
+| TRANSCRIPTION_MODEL | gemini-3.1-flash-lite | Microphone transcription |
 | TTS_MODEL | gemini-3.1-flash-tts-preview | Gemini TTS model |
 | THINK_HIGH | "high" | Thinking level for creative nodes |
 | THINK_LOW | "low" | Thinking level for mechanical nodes |
@@ -615,7 +620,7 @@ echo GEMINI_API_KEY="your_key_here" > .env
 # 3. Install deps
 pip install -r requirements.txt
 
-# 4. Build placeholder sound assets (first time only)
+# 4. Verify or restore the licensed sound library
 python -m tools.build_assets
 ```
 
@@ -629,7 +634,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 python test.py
-# Calls gemini-3.1-flash-lite, prints a 50-word detective cat story
+# Calls the Luna text route and prints a 50-word detective cat story
 ```
 
 ### Smoke Test (no HTTP, drives graph directly)

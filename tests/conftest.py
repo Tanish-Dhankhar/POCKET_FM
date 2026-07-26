@@ -20,6 +20,11 @@ from app import config, schemas
 # workspace, even if DATABRICKS_ENABLED=true is set for the running app.
 config.DATABRICKS_ENABLED = False
 
+# Same reasoning for artwork: gen_blueprint kicks off an image job, and no test
+# should ever spend money on an image API. Tests that exercise the image code
+# path enable it explicitly via monkeypatch.
+config.IMAGE_ENABLED = False
+
 
 # --------------------------------------------------------------------------- #
 # fake LLM
@@ -97,6 +102,43 @@ class FakeLLM:
             ],
         )
 
+    def _ConfirmCard(self, prompt):
+        return schemas.ConfirmCard(
+            title="Room 4B", genre="Supernatural Thriller",
+            setting="A county hospital at night", narrator_suggested=True,
+            recommended_ep_count=6, recommended_ep_minutes=8,
+            genre_tags=["Mystery", "Haunting", "Suspense", "Investigation"],
+            theme_tags=["Grief", "Denial", "Memory", "Courage"],
+        )
+
+    def _StoryAnalysis(self, prompt):
+        return schemas.StoryAnalysis(
+            strengths=["Immediate hook", "Contained setting"],
+            weaknesses=["Familiar ghost premise", "Limited daylight contrast"],
+            opportunities=["Deepen hospital history", "Use sound as evidence"],
+            threats=["Repetitive scares", "Unclear supernatural rules"],
+            genre_description="An intimate supernatural mystery with thriller pressure.",
+            genre_tags=["Mystery", "Haunting", "Suspense", "Investigation"],
+            genre_distribution=schemas.GenreDistribution(
+                action=5, drama=20, comedy=0, sci_fi=0,
+                horror=35, thriller=35, romance=5,
+            ),
+            theme_description="Grief distorts what Maya is willing to believe.",
+            themes=[
+                schemas.WeightedTheme(label="Grief", percentage=35),
+                schemas.WeightedTheme(label="Denial", percentage=30),
+                schemas.WeightedTheme(label="Memory", percentage=20),
+                schemas.WeightedTheme(label="Courage", percentage=15),
+            ],
+        )
+
+    def _EpisodeEvaluation(self, prompt):
+        return schemas.EpisodeEvaluation(points=[
+            schemas.EvaluationPoint(category="Hook", assessment="Immediate tension.", suggestion="Keep the first sound unexplained."),
+            schemas.EvaluationPoint(category="Pacing", assessment="Middle is clear.", suggestion="Trim one repeated exchange."),
+            schemas.EvaluationPoint(category="Cliffhanger", assessment="Strong final image.", suggestion="End on the door sound."),
+        ])
+
     def _EpisodeConfigSuggestion(self, prompt):
         return schemas.EpisodeConfigSuggestion(
             recommended_ep_count=6, rationale="Three nights split into six beats.")
@@ -172,6 +214,8 @@ def fake_llm(monkeypatch) -> FakeLLM:
     # Nodes import the symbol directly, so patch it in each node module.
     monkeypatch.setattr("app.nodes.text.generate_structured", llm)
     monkeypatch.setattr("app.nodes.audio.generate_structured", llm)
+    monkeypatch.setattr("app.story_service.generate_structured", llm)
+    monkeypatch.setattr("app.api_store.generate_structured", llm)
     return llm
 
 

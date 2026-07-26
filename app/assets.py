@@ -1,4 +1,4 @@
-"""Access to the prebuilt sound library described by assets/sound_manifest.json."""
+"""Access to the licensed sound library described by assets/sound_manifest.json."""
 from __future__ import annotations
 
 import json
@@ -8,11 +8,18 @@ from pathlib import Path
 from . import config
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=4)
+def _read_manifest(path: str, modified_ns: int) -> dict:
+    """Cache one immutable manifest revision while allowing live replacements."""
+    del modified_ns  # its value is the cache-busting revision key
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
 def manifest() -> dict:
-    if not config.SOUND_MANIFEST.exists():
+    path = config.SOUND_MANIFEST
+    if not path.exists():
         return {"music": {}, "sfx": {}}
-    return json.loads(config.SOUND_MANIFEST.read_text())
+    return _read_manifest(str(path), path.stat().st_mtime_ns)
 
 
 def music_moods() -> list[str]:

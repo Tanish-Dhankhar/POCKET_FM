@@ -18,6 +18,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# Prefer the standard SDK variable. The fallback keeps existing local .env files
+# that used the old hyphenated spelling working during the migration.
+OPENAI_API_KEY = (
+    os.environ.get("OPENAI_API_KEY", "")
+    or os.environ.get("OPEN-AI-API-KEY", "")
+).strip()
 
 # Origins allowed to call the API from a browser. Comma-separated override via
 # CORS_ORIGINS; "*" allows any origin (fine for local dev / a hackathon demo).
@@ -47,12 +53,37 @@ DATABRICKS_VOLUME = os.environ.get("DATABRICKS_VOLUME", "audio")
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-TEXT_MODEL = "gemini-3.1-flash-lite"
+TEXT_MODEL_HARD = os.environ.get("OPENAI_HARD_MODEL", "gpt-5.6-sol")
+TEXT_MODEL_EASY = os.environ.get("OPENAI_EASY_MODEL", "gpt-5.6-luna")
+TRANSCRIPTION_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
-# Thinking levels per task type (Flash-Lite supports minimal/low/medium/high).
+# Reasoning levels also select the OpenAI model tier in app.llm:
+# high -> Sol for creative/consistency-heavy work; low -> Luna for mechanical work.
 THINK_HIGH = "high"    # creative + consistency-heavy (blueprint, plan, script)
-THINK_LOW = "low"      # mechanical (sound-cue tagging, extraction)
+THINK_LOW = "low"      # mechanical (sound-cue tagging, evaluation, casting)
+
+# ---------------------------------------------------------------------------
+# Images (OpenAI) — series thumbnail + character portraits
+# ---------------------------------------------------------------------------
+# Off by default. Artwork is decoration: with this false, app/images.py never
+# contacts a provider and every generator returns None, so the story pipeline is
+# completely unaffected. Flip IMAGE_ENABLED=true in .env to turn it on.
+IMAGE_ENABLED = os.environ.get("IMAGE_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes",
+)
+IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
+# Portrait key art. Cropped by the landscape dashboard card, but reusable if a
+# portrait cover view is added later.
+IMAGE_SIZE = os.environ.get("IMAGE_SIZE", "1024x1536")
+IMAGE_QUALITY = os.environ.get("IMAGE_QUALITY", "medium")   # low | medium | high
+
+# At most this many character portraits per series, narrator excluded.
+MAX_CHARACTER_IMAGES = max(1, int(os.environ.get("MAX_CHARACTER_IMAGES", "3")))
+
+IMAGE_TIMEOUT_MS = max(1_000, int(os.environ.get("IMAGE_TIMEOUT_MS", "180000")))
+IMAGE_MAX_RETRIES = max(1, int(os.environ.get("IMAGE_MAX_RETRIES", "3")))
+IMAGE_MAX_CONCURRENCY = max(1, int(os.environ.get("IMAGE_MAX_CONCURRENCY", "2")))
 
 # ---------------------------------------------------------------------------
 # Paths

@@ -24,6 +24,8 @@ class SeriesState(TypedDict, total=False):
     setting: str
     logline: str
     characters: list[dict[str, Any]]        # CharacterProfile-shaped dicts
+    genre_tags: list[str]
+    theme_tags: list[str]
 
     # Stage 2
     clarification: dict[str, Any]           # {questions: [...]} as generated
@@ -84,6 +86,8 @@ def new_state(series_id: str, idea: str) -> SeriesState:
         idea=idea,
         language="",
         characters=[],
+        genre_tags=[],
+        theme_tags=[],
         clarification={},
         clarification_answers=[],
         episodes=[],

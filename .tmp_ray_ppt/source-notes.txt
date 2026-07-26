@@ -1,0 +1,8 @@
+Ray pitch deck source notes
+
+- Product content and claims are based on local project files: ppt.md, IDEA.MD, plan.md, AGENTIC_AUDIO_EDITOR.md, app/, and tests/.
+- Visual direction is based on the user-provided ZERO TO ONE poster reference.
+- Silkscreen Regular and Bold were obtained from the official Google Fonts repository under the SIL Open Font License:
+  https://github.com/google/fonts/tree/main/ofl/silkscreen
+- JetBrains Mono was already installed locally and is used for body copy.
+- No external images, charts, statistics, or third-party factual claims are used in the deck.

@@ -1,8 +1,123 @@
-# AI Creator Copilot — Implementation Plan
+# Ray — AI Creator Copilot Implementation Plan
 
 > Turn a single **plain-text story idea** into a publish-ready, multi-voice audio series.
-> **Stack:** Python · LangGraph · FastAPI (JSON backend) · Gemini `gemini-3.1-flash-lite` (text) · `gemini-3.1-flash-tts-preview` (TTS) · pydub (audio assembly).
-> **Scope note:** Video generation (IDEA.MD Step 9) is **deferred** for now.
+> **Stack:** Python · LangGraph · FastAPI (JSON backend) · OpenAI GPT-5.6 Sol/Luna (text) · Gemini `gemini-3.1-flash-tts-preview` (TTS) · pydub (audio assembly).
+> **Current scope:** working story-to-cinematic-audio prototype with continuation memory, AI evaluation, and no-TTS audio remixing. Automatic localization/dubbing, optional visuals, and the independent audio-listening critic are product expansion items.
+
+---
+
+## 0. Authoritative Product Narrative
+
+### 0.1 One-line pitch
+
+**Ray is Pocket FM's end-to-end AI Creator Copilot: the creator supplies the imagination and final judgment; Ray plans, remembers, produces, evaluates, and continues a connected audio series.**
+
+The product is designed to remove repetitive production work without removing creative control. Its success condition is not merely "generate text" or "generate audio." It is to help a creator move from a rough idea to a coherent, engaging, review-ready series whose characters, episodes, voices, and story history remain connected as the series grows.
+
+### 0.2 Creator user flow
+
+| Step | Creator action | What Ray does | Persistent result |
+| --- | --- | --- | --- |
+| 1. Input | Write the idea or record it naturally | Transcribes audio when needed and stores the original source | `idea.txt`, optional transcript/source recording |
+| 2. Understand | Review extracted information and answer four tailored questions | Extracts genre, theme, tone, language, setting, and implied characters; resolves ambiguity instead of guessing | Confirmed metadata and clarification answers |
+| 3. Build | Edit or approve the creative foundation | Builds the story world, central plot, characters, relationships, tone, themes, and story beats | Series Bible + Character Bible |
+| 4. Plan | Choose episode count and duration | Creates episode-wise storylines with summaries, main events, emotional focus, opening hooks, and ending cliffhangers | Episode Ledger / outlines |
+| 5. Produce | Review scripts and select voices | Writes narration/dialogue, casts persistent voices, renders line-level TTS takes, and directs cinematic audio | Scripts, immutable line WAVs, sound plan, final mix |
+| 6. Improve | Edit, regenerate, evaluate, or give an Audio Director instruction | Marks stale dependencies, runs the AI Evaluator Judge, and can remix existing voices without another TTS call | Updated evaluation, mix, and artifact state |
+| 7. Continue | Add a new plot, arc, or character | Loads prior story memory, updates affected world/character state, and plans the next connected episodes | New arc and episodes using the same continuity context |
+
+At every creative gate the available actions are **review, edit, regenerate, and approve**. Ray automates coordination; the creator remains the director.
+
+### 0.3 Feature set A — story intelligence and engagement
+
+- Written or spoken idea input with transcript review.
+- Four story-specific clarification questions with recommended options and free text.
+- Story-world, series-plot, theme, tone, and story-beat generation.
+- Character discovery with no fixed cast size; profiles include personality, backstory, relationships, vocal signature, and persistent voice choice.
+- Episode planning around emotional progression, opening hooks, main events, and ending cliffhangers intended to encourage the next play.
+- AI Evaluator Judge for opening hook, pacing, character distinction, audio-only clarity, emotional escalation, and cliffhanger strength.
+- Continuation: add a new plot, update the story/characters, and generate additional episodes with full prior context.
+- Creator control over plots, characters, episode outlines, scripts, emotions, voices, sound, refinement, and regeneration.
+
+### 0.4 Feature set B — production, audio, and reach
+
+- Per-character multi-voice TTS with sparse emotion direction and content-hash caching.
+- Immutable per-line source takes so editorial remixing does not require another synthesis pass.
+- Implemented Cinematic Audio Director: per-line pause, rate, gain, edge trimming, real voiced overlap, and interruption.
+- Scene-length ambience, sparse line-anchored SFX, music gain/fades, stereo placement, dialogue-aware ducking, cue retiming, and a fast peak-safe master.
+- Natural-language remix instructions and presets that rebuild the scene using existing voices without rewriting the script or calling TTS.
+- Durable JSON and WAV artifacts that support restart recovery, inspection, targeted editing, and selective regeneration.
+- Product expansion: automatic translation/localization, per-language dubbing while preserving character identity and emotional intent, and optional episode visuals.
+- Production roadmap: an independent audio-listening critic, objective QA, smallest-patch A/B revision, rollback, versioned timelines/stems, and delivery-profile mastering.
+
+### 0.5 What makes Ray different
+
+| Typical isolated AI tool | Ray |
+| --- | --- |
+| One prompt produces one disposable output | A stateful workflow works toward a complete series outcome |
+| Treats every episode as a new request | Loads the Series Bible, Character Bible, and Episode Ledger before generating |
+| Splits a plot into roughly equal parts | Plans emotional purpose, hooks, escalation, and cliffhangers |
+| Produces a flat or stitched speech file | Directs editable scenes with timing, overlaps, ambience, score, effects, and ducking |
+| Regenerates expensive voice output for every mix change | Preserves immutable line takes and remixes them locally without new TTS |
+| Hides decisions inside a black box | Stops at human gates and persists inspectable artifacts |
+
+The defensible combination is **end-to-end orchestration + continuity memory + binge-oriented story planning + cinematic editable audio + creator control**. Any individual capability can be copied; the connected workflow and artifact model are the product.
+
+### 0.6 Continuity contract
+
+Ray protects long-form continuity through three persistent sources:
+
+1. **Series Bible** — world rules, main storyline, tone, themes, story beats, and appended arcs.
+2. **Character Bible** — stable identity, role, personality, backstory, relationships, vocal signature, narrator flag, and `voice_id` stored on the character file.
+3. **Episode Ledger** — ordered outlines, prior summaries/events, scripts, emotional focus, cliffhangers, evaluations, sound plans, and audio manifests.
+
+Every new script receives the approved blueprint, the current episode outline, and a recap of earlier planned episodes. Continuation re-enters the workflow with prior arcs, characters, and episode context. Existing character voice IDs survive ordinary refinement; new characters are added only when the new plot requires them. Script, voice, timing, and story changes mark dependent audio/evaluation artifacts stale so outdated work is never treated as current.
+
+### 0.7 Audio generation contract
+
+Ray's audio path is intentionally different from `text -> TTS -> concatenate`:
+
+```text
+approved script + episode emotion + character voice bible
+    -> generate one immutable WAV take per non-empty spoken line
+    -> measure each take and create a bounded cinematic SoundPlan
+    -> compile pauses, rate, gain, trimming, overlap, and interruption
+    -> assemble the dialogue timeline while preserving actual voiced overlap
+    -> retime ambience, music, and SFX against the rebuilt dialogue
+    -> apply fades, stereo placement, and speech-aware music ducking
+    -> perform a fast peak-safe master and save the final WAV
+    -> optionally remix the same takes from a new creator direction (no TTS)
+```
+
+The LLM makes semantic directing choices through typed schemas. Deterministic code validates bounds and performs waveform/timeline operations. This separation keeps the system creative at the planning layer, reproducible at the rendering layer, and safe for fast iteration.
+
+### 0.8 Current architecture
+
+```text
+React Creator Studio
+  Ideaboard | Episode editor | Playback | AI Evaluator | Audio Director
+        |
+FastAPI API + in-process background jobs
+        |
+LangGraph stateful orchestration + human approval gates
+        |
+OpenAI structured story/directing specialists + Gemini transcription/TTS
+        |
+Deterministic Pydub timeline, overlap, ambience, ducking, mix, and master
+        |
+Durable series folder: atomic JSON + character files + episode folders
+                       + immutable line WAVs + content-hash TTS cache
+```
+
+LangGraph provides workflow state and review interrupts. The durable series folder remains the restart-safe source of truth. Long audio tasks execute per episode as background jobs, while each stage writes its artifact immediately so partial progress is recoverable.
+
+### 0.9 Delivery status
+
+**Implemented now:** text/mic input, four-question clarification, blueprint/character/episode generation, continuation memory, editable Ideaboard, on-demand episode jobs, multi-voice TTS, AI Evaluator Judge, Cinematic Audio Director, real overlap/interruption, ambience, dialogue-aware music ducking, final mix/master, and no-TTS remix UI/API.
+
+**Product expansion:** automatic localization/dubbing and optional visuals.
+
+**Production-grade audio roadmap:** word-level alignment, durable revision/A-B history, separate stems/buses, independent audio-listening critic, objective LUFS/true-peak/silence/masking gates, automatic rollback, and traceable delivery profiles. See `AGENTIC_AUDIO_EDITOR.md` for the detailed design.
 
 ---
 
@@ -20,14 +135,15 @@ This is the exact pipeline the app implements. Each stage has an approve / edit 
 | -- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
 | 0  | **Idea Input**         | Creator pastes the**entire story idea in detail** as plain text. That's the only required input.                                                                                                                                                                                                                   | —                                           |
 | 1  | **Extract & Confirm**  | LLM reads the idea and**extracts** genre, theme, tone, language, setting, and a first pass at the **characters it detected in the story** (count + who they are is inferred from the idea, not fixed). Shown back for confirmation.                                                                          | Change any field / confirm                   |
-| 2  | **Clarify**            | If anything is unclear/missing, LLM asks**up to 5 questions**, each with multiple-choice options **and** a free-text box (or both).                                                                                                                                                                          | Answer via options or text                   |
+| 2  | **Clarify**            | If anything is unclear/missing, LLM asks **exactly 4 story-specific questions**, each with multiple-choice options, one recommended direction, and a free-text answer.                                                                                                                                         | Answer via options or text                   |
 | 3  | **Series Blueprint**   | LLM writes the**overall plot / story world / main storyline**, plus **character descriptions & relationships** (the character set comes from the idea + clarifications), tone, and theme.                                                                                                                    | Edit any section / regenerate part / approve |
 | 4  | **Episode Config**     | LLM**recommends an episode count** based on the depth/scope of the story, and the creator sets the final **number of episodes** + **average episode length (5–15 min)**.                                                                                                                              | Accept recommendation or override            |
 | 5  | **Episode Plan**       | LLM divides the story into episodes — per episode: title, summary, main events,**emotional focus**, and an **ending cliffhanger**.                                                                                                                                                                          | Edit summaries / reorder / repace / approve  |
 | 6  | **Script Generation**  | LLM writes the full**dialogue for each character + narrator** (narrator only if the story needs one). **Emotion tags are added only on lines where the emotion genuinely shifts** — most lines carry no tag and are read in the voice's natural delivery.                                                   | Edit any line / regenerate / approve         |
 | 7  | **Voice Casting**      | Creator assigns a**distinct Gemini voice to each character** (and the narrator). LLM suggests a fit per character.                                                                                                                                                                                                 | Choose / change any voice                    |
-| 8  | **Audio Generation**   | TTS renders each line in the assigned voice (with emotion only where tagged); per-character clips are stitched into the episode with natural pauses.                                                                                                                                                                     | Preview / re-render a line                   |
-| 9  | **Sound Design & Mix** | LLM picks**sparse, subtle background music & SFX** from a prebuilt CC0 library and places them only where they add something (romantic scene → soft romantic bed; lightning → thunder SFX). **Many stretches stay dialogue-only or silent** so sound never feels wall-to-wall. Mixed low under the voices. | Preview / change / remove any cue            |
+| 8  | **Voice Takes**        | TTS renders every non-empty line once in the assigned character voice. These per-line WAVs are cached and preserved as immutable source takes for later editorial remixing.                                                                                                                                                | Preview / change voice / regenerate a line   |
+| 9  | **Cinematic Direction** | A structured SoundPlan controls pause, pace, gain, edge trimming, actual voiced overlap/interruption, ambience, music, SFX, fades, stereo placement, and dialogue-aware ducking. Deterministic code rebuilds and peak-safely masters the episode.                                                               | Preview / direct / remix without new TTS     |
+| 10 | **AI Evaluation**      | The Evaluator Judge reviews the blueprint, outline, and script for hook, pacing, character distinction, audio-only clarity, emotional escalation, and cliffhanger strength, then returns specific revision suggestions.                                                                                                  | Accept feedback / edit / evaluate again      |
 | ↺ | **Continue the Story** | Creator writes a**new plot in plain text**; the same pipeline runs — clarify if needed, **update the general story, update/add characters if mentioned**, and generate **new episodes** using the *same theme* and full prior context.                                                              | Full control again                           |
 
 **Key correction vs. a fixed cast:** there is **no preset number of characters**. The character list and count are *inferred from the initial story idea* in Stage 1, refined in clarification (Stage 2), and finalized in the blueprint (Stage 3). Continuation can add new characters when the new plot introduces them.
@@ -61,7 +177,7 @@ This is the exact pipeline the app implements. Each stage has an approve / edit 
       └──────────────┘ └──────────┘ └──────────────────┘
                                           ▲
                                    ┌──────┴───────┐
-                                   │ Prebuilt CC0 │
+                                   │ Licensed v2  │
                                    │ music + SFX  │
                                    └──────────────┘
 ```
@@ -81,13 +197,13 @@ POCKET_FM/
 ├── app/
 │   ├── main.py                # FastAPI app + routes
 │   ├── config.py              # model ids, paths, tunables
-│   ├── llm.py                 # Gemini text client + structured-output helper
+│   ├── llm.py                 # Routed OpenAI text client + structured-output helper
 │   ├── tts.py                 # Gemini TTS client (per-line rendering)
 │   ├── state.py               # LangGraph State schema
 │   ├── graph.py               # StateGraph wiring + checkpointer
 │   ├── nodes/
 │   │   ├── extract.py         # Stage 1: extract+confirm genre/theme/chars
-│   │   ├── clarify.py         # Stage 2: up to 5 clarification questions
+│   │   ├── clarify.py         # Stage 2: exactly 4 clarification questions
 │   │   ├── blueprint.py       # Stage 3: series blueprint (+ characters)
 │   │   ├── ep_config.py       # Stage 4: recommend & set ep count + length
 │   │   ├── episode_plan.py    # Stage 5: episode breakdown
@@ -224,23 +340,21 @@ Implemented with LangGraph `interrupt()` + a conditional edge that routes back t
 
 ---
 
-## 7. Text Generation with Gemini Flash Lite (`llm.py`)
+## 7. Routed OpenAI Text Generation (`llm.py`)
 
-- SDK: `google-genai` (`from google import genai`).
-- Model: `gemini-3.1-flash-lite` (GA; 1M context; configurable thinking).
+- SDK: `openai` (`from openai import OpenAI`).
+- Models: `gpt-5.6-sol` for difficult work and `gpt-5.6-luna` for smaller work.
 - **Structured output** (Pydantic schemas in `app/schemas/`) so every node returns validated JSON.
 - `thinking_level="high"` for extract / blueprint / episode-plan / script (creative + consistency-heavy); `"low"` for mechanical steps (sound-cue tagging).
 
 ```python
-client = genai.Client()  # reads GEMINI_API_KEY from .env
-resp = client.models.generate_content(
-    model="gemini-3.1-flash-lite",
-    contents=prompt,
-    config=types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_level="high"),
-        response_mime_type="application/json",
-        response_schema=BlueprintSchema,
-    ),
+client = OpenAI()  # reads OPENAI_API_KEY from .env
+resp = client.responses.parse(
+    model="gpt-5.6-sol",
+    input=prompt,
+    reasoning={"effort": "high"},
+    text_format=BlueprintSchema,
+    store=False,
 )
 ```
 
@@ -317,11 +431,14 @@ Each episode script is an **ordered list of typed lines** — consumed by both T
 
 ## 10. Sound Design (Stage 9) — subtle music & SFX
 
-### 10a. Prebuilt CC0 library (curated pack — one-time)
+### 10a. Licensed v2 library (curated pack — one-time)
 
-- **Pre-download a small, hand-picked set** of **CC0 / no-attribution** clips from Pixabay/Freesound into `assets/music/<mood>/` and `assets/sfx/`. Reliable, offline, demo-safe.
+- Keep a small, hand-picked Mixkit/CC0 pack in `assets/library/v2/music/` and
+  `assets/library/v2/sfx/`. It is reliable, offline, documented, and demo-safe.
 - Cover the IDEA.MD examples: romantic / horror / action / emotional / ambient / tense music; thunder, rain, footsteps, door, birds, battle, forest, etc.
-- Hand-write `assets/sound_manifest.json`: each entry `{file, type, mood/keywords, loopable, default_gain_db, license}`. This is the **closed vocabulary** the LLM must choose from.
+- Hand-write `assets/sound_manifest.json`: each entry records file, title,
+  mood/keywords, loopability, license, source, and download URL. This remains the
+  **closed vocabulary** the LLM must choose from.
 
 ### 10b. LLM cue selection (`sound_design.py`)
 
@@ -365,20 +482,24 @@ def render_line(text, voice_id, out_path):
 
 - Loop over episode lines → `lines/0001_Narrator.wav`, `0002_Maya.wav`, …
 - **Cache by content hash** so unchanged lines aren't re-billed on regeneration.
-- Concatenate with short natural pauses → `epNN_voices.wav`.
+- Preserve each rendered line as an immutable editorial source take. The first-pass voices track remains useful for preview/compatibility, but the final cinematic path rebuilds timing from the original line files.
 
 ---
 
-## 12. Mixing (Stage 9 assembly) — `audio_engine.py` (pydub)
+## 12. Cinematic Audio Direction & Mixing — `audio_engine.py` + `nodes/audio.py`
 
-1. **Timeline:** concatenate per-line voice clips, tracking each line's start offset (ms).
-2. **SFX:** `.overlay(sfx, position=line_offset)` at mapped moments.
-3. **Music:** loop the mood track under the relevant scene span; **duck under speech** with `gain_during_overlay=-12` (or slice-and-attenuate for true sidechain) so voices stay clear.
-4. Normalize levels, gentle fades between music changes; export `epNN_final.wav`.
-5. Keep beds subtle (~ −15 to −18 dB under voice) — *enhance, don't overpower*.
-6. **Preserve silence:** beats with no cue play as clean dialogue (or a brief held pause between lines). Don't backfill quiet stretches with ambience — the quiet is intentional pacing.
+The implemented fast path runs automatically after voice rendering and is also available as a creator-directed no-TTS remix:
 
-> Perf note: pydub `.overlay()` is pure-Python; overlay whole clips (not per-sample) and keep counts reasonable.
+1. **Measure immutable takes:** load each non-empty line WAV and record its actual duration without changing the source file.
+2. **Direct the performance:** a typed `SoundPlan` selects bounded per-line pause-before/after, playback rate, gain, edge trimming, real voiced overlap, and deliberate interruption.
+3. **Compile the dialogue timeline:** rebuild the scene from independent line takes; overlap means two voiced clips actually coexist rather than merely shortening a gap.
+4. **Retime the environment:** resolve line-anchored ambience, music, and SFX against the rebuilt dialogue positions so timing changes cannot leave cues behind.
+5. **Create cinematic space:** loop quiet ambience inside scene bounds, place sparse SFX with gain/pan, and apply music gain/fades.
+6. **Protect intelligibility:** derive speech intervals from the compiled dialogue and apply attack/release music ducking only around voiced regions.
+7. **Master safely:** sum the layers, preserve tails, normalize toward the fast master target, enforce a peak ceiling, and export `epNN_final.wav`.
+8. **Remix without TTS:** an Audio Director instruction or preset runs one new directing pass and one local render while reusing the exact script and voice takes.
+
+This implementation is intentionally a fast deterministic Pydub editor. Word-level alignment, durable A/B revisions, separate production stems/buses, LUFS/true-peak conformance, and an independent audio-listening critic remain the production-grade roadmap in `AGENTIC_AUDIO_EDITOR.md`.
 
 ---
 
@@ -393,7 +514,8 @@ def render_line(text, voice_id, out_path):
 ## 14. Tech Stack & Dependencies (`requirements.txt`)
 
 ```
-google-genai          # Gemini text + TTS
+openai               # Sol/Luna text generation
+google-genai         # Gemini transcription + TTS
 langgraph             # orchestration + checkpointer
 langchain-core        # message/type helpers (as needed)
 fastapi               # JSON backend

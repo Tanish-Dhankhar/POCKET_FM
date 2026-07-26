@@ -212,7 +212,11 @@ def get_episode_audio(series_id: str, number: int) -> FileResponse:
 def health() -> dict:
     return {
         "ok": True,
-        "text_model": config.TEXT_MODEL,
+        "text_models": {
+            "hard": config.TEXT_MODEL_HARD,
+            "easy": config.TEXT_MODEL_EASY,
+        },
+        "transcription_model": config.TRANSCRIPTION_MODEL,
         "tts_model": config.TTS_MODEL,
         "jobs": jobs.summary(),
     }

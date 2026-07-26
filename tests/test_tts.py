@@ -48,6 +48,7 @@ def fake_api(monkeypatch):
     models = FakeModels()
     monkeypatch.setattr(llm_mod, "_client", type("C", (), {"models": models})())
     monkeypatch.setattr(tts.config, "TTS_MIN_INTERVAL_SEC", 0.0)
+    monkeypatch.setattr(tts.config, "GEMINI_API_KEYS", [tts.config.GEMINI_API_KEY])
     monkeypatch.setattr(tts, "_last_call_at", 0.0)
     yield models
     llm_mod._client = None
@@ -204,3 +205,47 @@ def test_non_rate_limit_errors_are_not_retried(fake_api, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="invalid voice"):
         tts.render_line("Hi.", "NotAVoice", tmp_path / "a.wav")
     assert len(fake_api.calls) == 1, "a hard error must fail fast, not burn retries"
+
+
+def test_multiple_keys_use_independent_round_robin_lanes(tmp_path, monkeypatch):
+    created = {}
+
+    def make_client(api_key):
+        models = FakeModels()
+        created[api_key] = models
+        return type("Client", (), {"models": models})()
+
+    monkeypatch.setattr(tts.config, "GEMINI_API_KEYS", ["key-a", "key-b", "key-c"])
+    monkeypatch.setattr(tts.config, "TTS_MIN_INTERVAL_SEC", 0.0)
+    monkeypatch.setattr(tts.genai, "Client", make_client)
+    monkeypatch.setattr(tts, "_lanes_signature", ())
+    monkeypatch.setattr(tts, "_next_lane", 0)
+
+    for i in range(3):
+        tts.render_line(f"Line {i}", "Kore", tmp_path / f"{i}.wav")
+
+    assert set(created) == {"key-a", "key-b", "key-c"}
+    assert all(len(models.calls) == 1 for models in created.values())
+
+
+def test_invalid_key_is_disabled_and_another_key_takes_over(tmp_path, monkeypatch):
+    class InvalidModels(FakeModels):
+        def generate_content(self, **kw):
+            self.calls.append(kw)
+            raise RuntimeError("401 UNAUTHENTICATED: API_KEY_INVALID")
+
+    clients = {
+        "bad-key": type("Client", (), {"models": InvalidModels()})(),
+        "good-key": type("Client", (), {"models": FakeModels()})(),
+    }
+    monkeypatch.setattr(tts.config, "GEMINI_API_KEYS", ["bad-key", "good-key"])
+    monkeypatch.setattr(tts.config, "TTS_MIN_INTERVAL_SEC", 0.0)
+    monkeypatch.setattr(tts.genai, "Client", lambda api_key: clients[api_key])
+    monkeypatch.setattr(tts, "_lanes_signature", ())
+    monkeypatch.setattr(tts, "_next_lane", 0)
+
+    out = tts.render_line("Keep going.", "Kore", tmp_path / "fallback.wav")
+
+    assert out.exists()
+    assert len(clients["bad-key"].models.calls) == 1
+    assert len(clients["good-key"].models.calls) == 1

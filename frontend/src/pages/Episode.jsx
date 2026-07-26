@@ -1,8 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, Download, Pause, Pencil, Play, Save, Sparkles } from 'lucide-react'
+import PocketLogo from '../components/PocketLogo'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import * as studio from '../api/studio'
-import { joinEmotion, splitEmotion } from '../lib/format'
+import GenerationLoader from '../components/GenerationLoader'
+import { splitEmotion } from '../lib/format'
+
+const emotions = ['Calm','Curious','Whisper','Fear','Panic','Anger','Relief','Joy','Sad','Excited','Nervous','Serious','Sarcastic','Tender','Shouting','Trembling','Pleading','Cold','Amused','Determined']
+const bars = Array.from({length:180},(_,i) => Math.max(12,Math.min(96,42 + Math.sin(i*.31)*27 + ((i*17)%23)-11)))
+const stepProgress = {script:12,voices:42,sound:72,mix:88,evaluate:96}
+
+function clock(seconds) { if (!Number.isFinite(seconds)) return '0:00'; const whole=Math.floor(seconds); return `${Math.floor(whole/60)}:${String(whole%60).padStart(2,'0')}` }
 
 export default function Episode() {
   const { id, number } = useParams()
@@ -17,23 +26,17 @@ export default function Episode() {
   const job = useQuery({ queryKey: ['job', jobId], queryFn: () => studio.getJob(jobId), enabled: Boolean(jobId), refetchInterval: (q) => ['done','error','cancelled'].includes(q.state.data?.state) ? false : 2000 })
   useEffect(() => { if (job.data?.state === 'done') queryClient.invalidateQueries({ queryKey: ['episode', id, episodeNumber] }) }, [job.data?.state, queryClient, id, episodeNumber])
 
-  function update(index, field, value) {
-    setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line))
-  }
-  function updateText(index, value) {
-    const parsed = splitEmotion(lines[index]?.text)
-    update(index, 'text', joinEmotion(parsed.emotion, value))
-  }
-  function updateEmotion(index, value) {
-    const parsed = splitEmotion(lines[index]?.text)
-    update(index, 'text', joinEmotion(value, parsed.text))
-  }
+  const segments=data?.audio?.segments || []; const ratio=duration ? time/duration : 0
+  const activeLine=useMemo(() => { const ms=time*1000; const found=segments.find((segment) => ms >= segment.start_ms && ms < segment.end_ms); return found?.line_index ?? -1 },[segments,time])
+  useEffect(() => { if (activeLine < 0 || !scrollRef.current) return; const el=scrollRef.current.children[activeLine]; if (el) el.scrollIntoView({behavior:'smooth',block:'nearest'}) },[activeLine])
+  const audioReady=Boolean(data?.audio?.final || data?.audio?.voices) && !data?.audio?.stale
+  function toggleAudio() { const audio=audioRef.current; if (!audio) return; if (audio.paused) audio.play(); else audio.pause() }
+  function seek(event) { const audio=audioRef.current; if (!audio || !duration) return; const rect=event.currentTarget.getBoundingClientRect(); audio.currentTime=Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width))*duration }
+  function updateLine(index,key,value) { setLines((current) => current.map((line,i) => i === index ? {...line,[key]:value || (key === 'emotion' ? null : value)} : line)) }
 
-  if (isLoading) return <div className="episode-page"><div className="skeleton" style={{height:250}} /></div>
-  if (error) return <div className="empty"><div><h2>Episode unavailable.</h2><p className="error">{error.message}</p><Link className="button" to={`/series/${id}`}>Back to series</Link></div></div>
-  const outline = data?.outline || {}
-  const audioReady = Boolean(data?.audio?.final || data?.audio?.voices) && !data?.audio?.stale
-  const busy = ['queued','running'].includes(job.data?.state) || render.isPending
+  if (isLoading) return <div className="episode-loading"><div className="skeleton"/></div>
+  if (error) return <div className="empty"><div><h2>Episode unavailable.</h2><p className="error">{error.message}</p><button className="button" onClick={() => navigate(`/series/${id}`)}>Back to series</button></div></div>
+  const outline=data?.outline || {}; const evaluation=data?.evaluation || {}
 
   return <div className="episode-page">
     <div className="topbar"><Link className="brand" to={`/series/${id}`}>← <span>{outline.title || `Episode ${episodeNumber}`}</span></Link><span className={`chip ${audioReady ? 'success' : ''}`}>{audioReady ? 'Audio ready' : data?.audio?.stale ? 'Audio needs re-render' : data?.status || 'Draft'}</span></div>
