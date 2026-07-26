@@ -55,6 +55,10 @@ DATABRICKS_VOLUME = os.environ.get("DATABRICKS_VOLUME", "audio")
 # ---------------------------------------------------------------------------
 TEXT_MODEL_HARD = os.environ.get("OPENAI_HARD_MODEL", "gpt-5.6-sol")
 TEXT_MODEL_EASY = os.environ.get("OPENAI_EASY_MODEL", "gpt-5.6-luna")
+# Gemini model used by app.llm (text generation, structured output, and
+# transcription). Restored after the OpenAI-routing config migration removed it
+# while app/llm.py still references it.
+TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.1-flash-lite")
 TRANSCRIPTION_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
