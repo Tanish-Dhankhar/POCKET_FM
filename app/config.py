@@ -120,9 +120,13 @@ MODEL_MAX_CONCURRENCY = max(1, int(os.environ.get("MODEL_MAX_CONCURRENCY", "8"))
 
 # In-process job controls. These deliberately do not imply multi-instance
 # durability; PostgreSQL/queue-backed work remains a later migration.
-JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "2")))
+JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "5")))
 JOB_MAX_QUEUE = max(1, int(os.environ.get("JOB_MAX_QUEUE", "100")))
 JOB_MAX_RETAINED = max(1, int(os.environ.get("JOB_MAX_RETAINED", "200")))
+# Cap how many story-generation jobs (episode / analysis / refinement /
+# emotional curve) may be queued or running at once. A 6th request gets 429.
+STORY_MAX_CONCURRENCY = max(1, int(os.environ.get("STORY_MAX_CONCURRENCY", "5")))
+STORY_JOB_KINDS = frozenset({"episode", "analysis", "refinement", "emotional_curve"})
 
 # Input guardrails cap memory and provider work without affecting normal ideas,
 # recordings, or scripts.

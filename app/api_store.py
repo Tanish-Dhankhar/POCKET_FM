@@ -408,7 +408,10 @@ def save_confirmations(series_id: str, body: ConfirmationBody) -> dict:
 @router.post("/series/{series_id}/analysis/regenerate", status_code=202)
 def regenerate_analysis(series_id: str) -> dict:
     _require(series_id)
-    return story_service.start_analysis_job(series_id)
+    try:
+        return story_service.start_analysis_job(series_id)
+    except jobs.QueueFullError as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -442,7 +445,10 @@ def refine_series(series_id: str, body: RefinementBody) -> dict:
     instruction = body.instruction.strip()
     if not instruction:
         raise HTTPException(422, "refinement instruction cannot be empty")
-    return story_service.start_refinement_job(series_id, instruction)
+    try:
+        return story_service.start_refinement_job(series_id, instruction)
+    except jobs.QueueFullError as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
 
 
 @router.post("/series/{series_id}/episodes/{number}/evaluate")

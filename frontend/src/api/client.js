@@ -28,9 +28,12 @@ export async function request(path, { method = 'GET', body, headers = {}, signal
     let detail
     try { detail = await response.json() } catch { detail = await response.text() }
     const raw = detail?.detail || detail?.message || `${response.status} ${response.statusText}`
+    const detailText = String(raw)
     const message = response.status === 429
-      ? 'Voice generation is rate-limited. The job will take longer; try again shortly.'
-      : String(raw)
+      ? (detailText.toLowerCase().includes('stories')
+          ? detailText
+          : 'Voice generation is rate-limited. The job will take longer; try again shortly.')
+      : detailText
     throw new ApiError(message, response.status, detail)
   }
 
