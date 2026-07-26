@@ -55,6 +55,10 @@ DATABRICKS_VOLUME = os.environ.get("DATABRICKS_VOLUME", "audio")
 # ---------------------------------------------------------------------------
 TEXT_MODEL_HARD = os.environ.get("OPENAI_HARD_MODEL", "gpt-5.6-sol")
 TEXT_MODEL_EASY = os.environ.get("OPENAI_EASY_MODEL", "gpt-5.6-luna")
+# Gemini model used by app.llm (text generation, structured output, and
+# transcription). Restored after the OpenAI-routing config migration removed it
+# while app/llm.py still references it.
+TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.1-flash-lite")
 TRANSCRIPTION_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
@@ -116,9 +120,13 @@ MODEL_MAX_CONCURRENCY = max(1, int(os.environ.get("MODEL_MAX_CONCURRENCY", "8"))
 
 # In-process job controls. These deliberately do not imply multi-instance
 # durability; PostgreSQL/queue-backed work remains a later migration.
-JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "2")))
+JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "5")))
 JOB_MAX_QUEUE = max(1, int(os.environ.get("JOB_MAX_QUEUE", "100")))
 JOB_MAX_RETAINED = max(1, int(os.environ.get("JOB_MAX_RETAINED", "200")))
+# Cap how many story-generation jobs (episode / analysis / refinement /
+# emotional curve) may be queued or running at once. A 6th request gets 429.
+STORY_MAX_CONCURRENCY = max(1, int(os.environ.get("STORY_MAX_CONCURRENCY", "5")))
+STORY_JOB_KINDS = frozenset({"episode", "analysis", "refinement", "emotional_curve"})
 
 # Input guardrails cap memory and provider work without affecting normal ideas,
 # recordings, or scripts.

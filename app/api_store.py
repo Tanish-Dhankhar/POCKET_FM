@@ -175,6 +175,7 @@ def patch_blueprint(series_id: str, body: PlotPatch) -> dict:
     if swot:
         swot["stale"] = True
         store.write_json(swot_path, swot)
+    store.mark_emotional_curve_stale(series_id)
     store.save_index(series_id)
     return store.load_blueprint(series_id)
 
@@ -283,6 +284,8 @@ def put_outline(series_id: str, number: int, body: OutlinePatch) -> dict:
     _require(series_id)
     outline = {**body.outline, "number": number}
     store.save_episode_outline(series_id, outline)
+    # The curve is scored off the outlines, so an edit invalidates it.
+    store.mark_emotional_curve_stale(series_id)
     store.save_index(series_id)
     return outline
 
@@ -405,7 +408,35 @@ def save_confirmations(series_id: str, body: ConfirmationBody) -> dict:
 @router.post("/series/{series_id}/analysis/regenerate", status_code=202)
 def regenerate_analysis(series_id: str) -> dict:
     _require(series_id)
-    return story_service.start_analysis_job(series_id)
+    try:
+        return story_service.start_analysis_job(series_id)
+    except jobs.QueueFullError as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
+
+
+# --------------------------------------------------------------------------- #
+# emotional curve (top-3 tracked emotions across the episode plan)
+# --------------------------------------------------------------------------- #
+@router.get("/series/{series_id}/emotional-curve")
+def get_emotional_curve(series_id: str) -> dict:
+    _require(series_id)
+    return store.load_emotional_curve(series_id)
+
+
+@router.post("/series/{series_id}/emotional-curve/regenerate", status_code=202)
+def regenerate_emotional_curve(series_id: str) -> dict:
+    """Kick off a background job that recharts the emotional arc.
+
+    Requires the episode plan to exist — the curve is scored per planned episode,
+    so there is nothing to chart before then.
+    """
+    _require(series_id)
+    if not store.episode_numbers(series_id):
+        raise HTTPException(409, "generate the episode plan before building an emotional curve")
+    try:
+        return story_service.start_emotional_curve_job(series_id)
+    except jobs.QueueFullError as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
 
 
 @router.post("/series/{series_id}/refine", status_code=202)
@@ -414,7 +445,10 @@ def refine_series(series_id: str, body: RefinementBody) -> dict:
     instruction = body.instruction.strip()
     if not instruction:
         raise HTTPException(422, "refinement instruction cannot be empty")
-    return story_service.start_refinement_job(series_id, instruction)
+    try:
+        return story_service.start_refinement_job(series_id, instruction)
+    except jobs.QueueFullError as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
 
 
 @router.post("/series/{series_id}/episodes/{number}/evaluate")

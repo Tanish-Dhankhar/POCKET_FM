@@ -4,7 +4,9 @@ from __future__ import annotations
 import threading
 import time
 
-from app import jobs
+import pytest
+
+from app import config, jobs
 
 
 def _wait_for(job_id: str, state: str, timeout: float = 2.0) -> dict:
@@ -41,3 +43,47 @@ def test_worker_result_can_mark_a_job_cancelled():
 
     finished = _wait_for(job["id"], "cancelled")
     assert finished["message"] == "Cancelled"
+
+
+def test_at_most_five_story_jobs_can_run_at_once(monkeypatch):
+    """A 6th distinct story generation is rejected while five are active."""
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 5)
+    release = threading.Event()
+
+    def work(handle):
+        release.wait(2)
+        return {"ok": True}
+
+    started = [
+        jobs.start_or_rejoin(
+            "episode", work, dedupe_key=("episode", f"series-{i}", i),
+            series_id=f"series-{i}", number=i,
+        )
+        for i in range(5)
+    ]
+    assert len({job["id"] for job in started}) == 5
+
+    with pytest.raises(jobs.QueueFullError, match="at most 5 stories"):
+        jobs.start_or_rejoin(
+            "episode", work, dedupe_key=("episode", "series-overflow", 1),
+            series_id="series-overflow", number=1,
+        )
+
+    # Rejoining an in-flight story still works under the cap.
+    rejoined = jobs.start_or_rejoin(
+        "episode", work, dedupe_key=("episode", "series-0", 0),
+        series_id="series-0", number=0,
+    )
+    assert rejoined["id"] == started[0]["id"]
+
+    # Non-story work (e.g. images) is not counted against the story cap.
+    images = jobs.start_or_rejoin(
+        "images", work, dedupe_key=("images", "series-art"),
+        series_id="series-art",
+    )
+    assert images["state"] in ("queued", "running")
+
+    release.set()
+    for job in started:
+        _wait_for(job["id"], "done")
+    _wait_for(images["id"], "done")
