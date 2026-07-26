@@ -33,6 +33,8 @@ def test_health_reports_configured_models(client):
         "hard": config.TEXT_MODEL_HARD,
         "easy": config.TEXT_MODEL_EASY,
     }
+    assert body["text_call_routes"] == config.TEXT_TASKS
+    assert body["model_cache"]["enabled"] == config.MODEL_CACHE_ENABLED
     assert body["transcription_model"] == config.TRANSCRIPTION_MODEL
     assert body["tts_model"] == config.TTS_MODEL
 
@@ -68,6 +70,16 @@ def test_approve_advances_to_the_next_stage(client):
     sid = _create(client)["series_id"]
     body = client.post(f"/series/{sid}/approve", json={"action": "approve"}).json()
     assert body["stage"] == "clarify"
+
+
+def test_confirm_card_is_preloaded_without_an_extra_llm_call(client, offline):
+    sid = _create(client)["series_id"]
+    calls_before = len(offline["llm"].calls)
+
+    card = client.post(f"/studio/series/{sid}/confirm-card").json()
+
+    assert card["title"]
+    assert len(offline["llm"].calls) == calls_before
 
 
 def test_approve_works_with_an_empty_body(client):

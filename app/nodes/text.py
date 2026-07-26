@@ -6,11 +6,11 @@ graph.py so that resuming after an interrupt never re-runs generation.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from .. import image_service, prompts, schemas, store
+from .. import config, image_service, prompts, schemas, store
 from ..llm import generate_structured
-from ..config import THINK_HIGH, THINK_LOW, CLARIFY_QUESTION_COUNT
 from ..state import SeriesState
 
 
@@ -45,10 +45,31 @@ def _recap_before(state: SeriesState, number: int) -> str:
 def gen_extract(state: SeriesState) -> dict[str, Any]:
     sid = state["series_id"]
     store.save_idea(sid, state["idea"])
-    res = generate_structured(
-        prompts.extract(state["idea"], state.get("feedback", "")),
-        schemas.ExtractResult, thinking=THINK_HIGH, system=prompts.SYSTEM,
-    )
+
+    # Both calls depend only on the initial idea, so run them concurrently.  The
+    # first call returns all four questions in the same structured response as
+    # the provisional extraction; the second preloads the later confirm card.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="wizard-llm") as pool:
+        bootstrap_future = pool.submit(
+            generate_structured,
+            prompts.extract(state["idea"], state.get("feedback", "")),
+            schemas.ExtractResult,
+            task="wizard_bootstrap",
+            system=prompts.SYSTEM,
+        )
+        confirm_future = pool.submit(
+            generate_structured,
+            prompts.confirm_card(state["idea"], state.get("feedback", "")),
+            schemas.ConfirmCard,
+            task="confirm_card",
+            system=prompts.SYSTEM,
+        )
+        res = bootstrap_future.result()
+        card = confirm_future.result().model_dump()
+
+    clarification = _normalise_clarify({"questions": [q.model_dump() for q in res.questions]})
+    store.save_clarification(sid, clarification)
+    store.save_confirmation_draft(sid, card)
     out = {
         "genre": res.genre, "theme": res.theme, "tone": res.tone,
         "language": res.language, "setting": res.setting, "logline": res.logline,
@@ -61,7 +82,7 @@ def gen_extract(state: SeriesState) -> dict[str, Any]:
                          meta=out)
     store.save_index(sid, title=state.get("title") or res.logline[:60],
                      genre=res.genre, stage="extract")
-    return out
+    return {**out, "clarification": clarification, "confirmation_draft": card}
 
 
 # --------------------------------------------------------------------------- #
@@ -73,10 +94,10 @@ def _normalise_clarify(clarification: dict[str, Any]) -> dict[str, Any]:
     The schema already pins the count, but a guard here means a misbehaving model
     can never break the wizard's fixed N-step flow:
       - exactly CLARIFY_QUESTION_COUNT questions (trim, or pad with a generic one)
-      - every question has options and allows free text
+      - every question has exactly three options and allows free text
       - exactly one option per question is `recommended`
     """
-    n = CLARIFY_QUESTION_COUNT
+    n = config.CLARIFY_QUESTION_COUNT
     questions = list(clarification.get("questions") or [])[:n]
 
     while len(questions) < n:
@@ -87,20 +108,25 @@ def _normalise_clarify(clarification: dict[str, Any]) -> dict[str, Any]:
                  "recommended": True},
                 {"label": "Surprise me", "detail": "Take a bolder creative swing.",
                  "recommended": False},
+                {"label": "Raise the stakes", "detail": "Make the consequences sharper.",
+                 "recommended": False},
             ],
             "allow_free_text": True,
         })
 
     for q in questions:
         q["allow_free_text"] = True
-        options = list(q.get("options") or [])
-        if not options:
-            options = [
+        options = list(q.get("options") or [])[:3]
+        defaults = [
                 {"label": "Keep it as described", "detail": "Stay close to the idea.",
                  "recommended": True},
                 {"label": "Surprise me", "detail": "Take a bolder creative swing.",
                  "recommended": False},
-            ]
+                {"label": "Raise the stakes", "detail": "Make the consequences sharper.",
+                 "recommended": False},
+        ]
+        while len(options) < 3:
+            options.append(defaults[len(options)])
         # exactly one recommended: keep the first flagged, else default to the first
         flagged = [i for i, o in enumerate(options) if o.get("recommended")]
         winner = flagged[0] if flagged else 0
@@ -112,9 +138,13 @@ def _normalise_clarify(clarification: dict[str, Any]) -> dict[str, Any]:
 
 
 def gen_clarify(state: SeriesState) -> dict[str, Any]:
+    # Normal wizard progression reuses the questions generated in gen_extract;
+    # only an explicit regenerate action spends another model call.
+    if state.get("clarification") and not state.get("feedback", "").strip():
+        return {"clarification": state["clarification"], "stage": "clarify"}
     res = generate_structured(
         prompts.clarify(state["idea"], _extracted(state), state.get("feedback", "")),
-        schemas.ClarifyResult, thinking=THINK_HIGH, system=prompts.SYSTEM,
+        schemas.ClarifyResult, task="clarify_regeneration", system=prompts.SYSTEM,
     )
     clarification = _normalise_clarify(res.model_dump())
     store.save_clarification(state["series_id"], clarification)
@@ -131,13 +161,27 @@ def gen_blueprint(state: SeriesState) -> dict[str, Any]:
             state.get("clarification_answers", []),
             state.get("arcs", []), state.get("feedback", ""),
         ),
-        schemas.Blueprint, thinking=THINK_HIGH, system=prompts.SYSTEM,
+        schemas.Blueprint, task="blueprint", system=prompts.SYSTEM,
     )
     sid = state["series_id"]
     characters = [c.model_dump() for c in bp.characters]
     # Answers may have arrived with the approve command — persist them too.
     store.save_clarification_answers(sid, state.get("clarification_answers", []))
-    store.save_blueprint(sid, bp.model_dump(), meta=_extracted(state))
+    blueprint = bp.model_dump()
+    authoritative_meta = {
+        "genre": bp.genre, "genre_tags": bp.genre_tags,
+        "theme": bp.theme, "theme_tags": bp.theme_tags,
+        "tone": bp.tone, "language": bp.language,
+        "setting": bp.setting, "logline": bp.logline,
+    }
+    store.save_blueprint(sid, blueprint, meta=authoritative_meta)
+    draft = store.load_confirmation_draft(sid)
+    if draft:
+        draft.update({
+            "genre": bp.genre, "setting": bp.setting,
+            "genre_tags": bp.genre_tags, "theme_tags": bp.theme_tags,
+        })
+        store.save_confirmation_draft(sid, draft)
     store.save_index(sid, stage="blueprint", arcs=state.get("arcs", []))
     # plot.json and the character files (with their physical descriptions) now
     # exist, which is everything the artwork needs. Runs in the background — the
@@ -145,9 +189,10 @@ def gen_blueprint(state: SeriesState) -> dict[str, Any]:
     image_service.start_images_job(sid)
     return {
 
-        "blueprint": bp.model_dump(),
+        "blueprint": blueprint,
         # blueprint is now the authoritative character source
         "characters": characters,
+        **authoritative_meta,
         "stage": "blueprint",
     }
 
@@ -156,9 +201,15 @@ def gen_blueprint(state: SeriesState) -> dict[str, Any]:
 # Stage 4 — Episode config recommendation
 # --------------------------------------------------------------------------- #
 def gen_ep_config(state: SeriesState) -> dict[str, Any]:
+    if state.get("ep_count"):
+        return {
+            "recommended_ep_count": int(state["ep_count"]),
+            "ui": {"ep_config_rationale": "Creator already confirmed the season length."},
+            "stage": "ep_config",
+        }
     sug = generate_structured(
         prompts.ep_config(state["blueprint"], state.get("feedback", "")),
-        schemas.EpisodeConfigSuggestion, thinking=THINK_HIGH, system=prompts.SYSTEM,
+        schemas.EpisodeConfigSuggestion, task="episode_config", system=prompts.SYSTEM,
     )
     return {
         "recommended_ep_count": sug.recommended_ep_count,
@@ -177,7 +228,7 @@ def gen_episode_plan(state: SeriesState) -> dict[str, Any]:
     plan = generate_structured(
         prompts.episode_plan(state["blueprint"], ep_count, ep_minutes, prior,
                              state.get("feedback", "")),
-        schemas.EpisodePlan, thinking=THINK_HIGH, system=prompts.SYSTEM,
+        schemas.EpisodePlan, task="episode_plan", system=prompts.SYSTEM,
     )
     sid = state["series_id"]
     episodes = [e.model_dump() for e in plan.episodes]
@@ -203,8 +254,8 @@ def gen_script(state: SeriesState) -> dict[str, Any]:
         sc = generate_structured(
             prompts.script(state["blueprint"], ep, _recap_before(state, num),
                           state.get("feedback", ""),
-                          state.get("include_narrator")),
-            schemas.EpisodeScript, thinking=THINK_HIGH, system=prompts.SYSTEM,
+                          state.get("include_narrator"), state.get("ep_minutes")),
+            schemas.EpisodeScript, task="episode_script", system=prompts.SYSTEM,
         )
         lines = [ln.model_dump() for ln in sc.lines]
         scripts[str(num)] = lines
@@ -224,8 +275,8 @@ def gen_script_for_episode(state: SeriesState, number: int) -> list[dict[str, An
     sc = generate_structured(
         prompts.script(state["blueprint"], ep, _recap_before(state, number),
                       state.get("feedback", ""),
-                      state.get("include_narrator")),
-        schemas.EpisodeScript, thinking=THINK_HIGH, system=prompts.SYSTEM,
+                      state.get("include_narrator"), state.get("ep_minutes")),
+        schemas.EpisodeScript, task="episode_script", system=prompts.SYSTEM,
     )
     lines = [ln.model_dump() for ln in sc.lines]
     store.save_episode_script(state["series_id"], number, lines)
@@ -238,7 +289,7 @@ def gen_script_for_episode(state: SeriesState, number: int) -> list[dict[str, An
 def gen_voice_cast(state: SeriesState) -> dict[str, Any]:
     sug = generate_structured(
         prompts.voice_cast(state.get("characters", []), state.get("feedback", "")),
-        schemas.VoiceCastSuggestion, thinking=THINK_LOW, system=prompts.SYSTEM,
+        schemas.VoiceCastSuggestion, task="voice_cast", system=prompts.SYSTEM,
     )
     cast = {a.character: a.voice_id for a in sug.assignments}
     reasons = {a.character: a.reason for a in sug.assignments}

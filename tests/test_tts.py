@@ -178,6 +178,27 @@ def test_transient_503_is_retried(fake_api, tmp_path, monkeypatch):
     assert len(fake_api.calls) == 3
 
 
+def test_empty_audio_response_is_retried(fake_api, tmp_path, monkeypatch):
+    monkeypatch.setattr(tts.time, "sleep", lambda s: None)
+    state = {"calls": 0}
+
+    def empty_then_audio(**kw):
+        fake_api.calls.append(kw)
+        state["calls"] += 1
+        if state["calls"] == 1:
+            part = type("Part", (), {"inline_data": None})()
+            content = type("Content", (), {"parts": [part]})()
+            return type("Response", (), {
+                "candidates": [type("Candidate", (), {"content": content})()]
+            })()
+        return _FakeResponse()
+
+    fake_api.generate_content = empty_then_audio
+    out = tts.render_line("Retry empty audio.", "Kore", tmp_path / "a.wav")
+    assert out.exists()
+    assert len(fake_api.calls) == 2
+
+
 def test_backoff_grows_and_is_bounded(fake_api, tmp_path, monkeypatch):
     slept: list[float] = []
     monkeypatch.setattr(tts.time, "sleep", lambda s: slept.append(s))

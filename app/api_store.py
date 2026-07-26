@@ -180,6 +180,21 @@ def patch_blueprint(series_id: str, body: PlotPatch) -> dict:
     return store.load_blueprint(series_id)
 
 
+@router.get("/series/{series_id}/emotional-curve")
+def get_emotional_curve(series_id: str) -> dict:
+    _require(series_id)
+    return store.load_emotional_curve(series_id)
+
+
+@router.post("/series/{series_id}/emotional-curve/regenerate", status_code=202)
+def regenerate_emotional_curve(series_id: str) -> dict:
+    _require(series_id)
+    try:
+        return story_service.start_emotional_curve_job(series_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 # --------------------------------------------------------------------------- #
 # characters
 # --------------------------------------------------------------------------- #
@@ -364,20 +379,19 @@ def cancel_job(job_id: str) -> dict:
 def confirm_card(series_id: str) -> dict:
     """Title + narrator suggestion + recommended episode config.
 
-    The graph only recommends an episode count *after* the blueprint, but the
-    wizard's confirm step comes first — so this is one cheap Flash-Lite call over
-    the idea and the creator's answers. The title is persisted immediately.
+    The initial graph node creates this in parallel with the questions. This
+    endpoint normally returns the persisted draft without another model call;
+    the fallback supports series created before draft caching was added.
     """
     _require(series_id)
     inp = store.load_input(series_id)
-    bp = store.load_blueprint(series_id)
-    extracted = {k: bp.get(k) for k in
-                 ("genre", "theme", "tone", "setting", "language", "logline")}
-
-    card = generate_structured(
-        prompts.confirm_card(inp["idea"], extracted, inp["clarification_answers"]),
-        schemas.ConfirmCard, thinking=config.THINK_LOW, system=prompts.SYSTEM,
-    ).model_dump()
+    card = store.load_confirmation_draft(series_id)
+    if not card:
+        card = generate_structured(
+            prompts.confirm_card(inp["idea"]),
+            schemas.ConfirmCard, task="confirm_card", system=prompts.SYSTEM,
+        ).model_dump()
+        store.save_confirmation_draft(series_id, card)
 
     store.save_index(series_id, title=card["title"], genre=card["genre"])
     return card
