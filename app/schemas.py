@@ -22,18 +22,6 @@ class DetectedCharacter(BaseModel):
     description: str = Field(description="one or two sentences on who they are")
 
 
-class ExtractResult(BaseModel):
-    genre: str
-    theme: str
-    tone: str
-    language: str
-    setting: str = Field(description="time period + place the story lives in")
-    logline: str = Field(description="one-sentence summary of the whole series")
-    characters: list[DetectedCharacter] = Field(
-        description="every character the idea implies; count is inferred, not fixed"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Stage 2 — Clarification (ALWAYS exactly 4 questions, each with options)
 # ---------------------------------------------------------------------------
@@ -51,10 +39,32 @@ class ClarifyQuestion(BaseModel):
         description="specific to THIS story — name its characters, setting, premise"
     )
     options: list[ClarifyOption] = Field(
-        min_length=2, max_length=4,
-        description="3-4 meaningfully different creative directions",
+        min_length=3, max_length=3,
+        description="exactly 3 meaningfully different creative directions",
     )
     allow_free_text: bool = True
+
+
+class ExtractResult(BaseModel):
+    """One initial call returns provisional metadata and all wizard questions."""
+
+    genre: str
+    theme: str
+    tone: str
+    language: str
+    setting: str = Field(description="time period + place the story lives in")
+    logline: str = Field(description="one-sentence summary of the whole series")
+    characters: list[DetectedCharacter] = Field(
+        description="every character explicitly implied by the initial idea"
+    )
+    questions: list[ClarifyQuestion] = Field(
+        default_factory=list,
+        min_length=CLARIFY_QUESTION_COUNT,
+        max_length=CLARIFY_QUESTION_COUNT,
+        description=(
+            f"exactly {CLARIFY_QUESTION_COUNT} questions, each with exactly 3 options"
+        ),
+    )
 
 
 class ClarifyResult(BaseModel):
@@ -95,26 +105,40 @@ class CharacterProfile(BaseModel):
     gender: str = Field(default="Unspecified", description="gender identity or presentation")
     description: str
     personality: str = Field(description="core traits driving their behaviour")
-    details: str = ""
-    physical_persona: str = ""
-    backstory: str = ""
+    details: str = Field(description="goals, fears, contradictions, and story function")
+    physical_persona: str = Field(description="concise appearance and physical presence")
+    backstory: str = Field(description="formative history relevant to the plot")
     relationships: list[str] = Field(
         default_factory=list, description="ties to other characters, as short phrases"
     )
     vocal_signature: str = Field(
         description="how they sound: pace, pitch, verbal tics — guides casting & emotion"
     )
-    vocal_direction: str = ""
+    vocal_direction: str = Field(description="performance direction for emotional range")
     is_narrator: bool = False
 
 
 class Blueprint(BaseModel):
     logline: str
     story_world: str = Field(description="the setting/world and its rules")
-    main_storyline: str = Field(description="overall plot arc of the series")
-    story_beats: list[str] = Field(default_factory=list, description="3-6 major series beats")
+    main_storyline: str = Field(
+        min_length=1800,
+        description=(
+            "detailed causal whole-series plot with setup, escalation, reversals, "
+            "character consequences, climax, and resolution direction"
+        )
+    )
+    story_beats: list[str] = Field(
+        min_length=6, max_length=10,
+        description="6-10 ordered major series beats",
+    )
+    genre: str
+    genre_tags: list[str] = Field(min_length=4, max_length=4)
     tone: str
     theme: str
+    theme_tags: list[str] = Field(min_length=4, max_length=4)
+    setting: str = Field(description="time period and primary place")
+    language: str
     characters: list[CharacterProfile]
 
 
@@ -140,6 +164,22 @@ class EpisodePlanItem(BaseModel):
 
 class EpisodePlan(BaseModel):
     episodes: list[EpisodePlanItem]
+
+
+class EmotionCurvePoint(BaseModel):
+    episode: int
+    emotion_1: int = Field(default=0, ge=0, le=100)
+    emotion_2: int = Field(default=0, ge=0, le=100)
+    emotion_3: int = Field(default=0, ge=0, le=100)
+
+
+class EmotionCurve(BaseModel):
+    emotion_1_label: str
+    emotion_2_label: str
+    emotion_3_label: str
+    dominant_emotion: str
+    summary: str
+    points: list[EmotionCurvePoint]
 
 
 # ---------------------------------------------------------------------------

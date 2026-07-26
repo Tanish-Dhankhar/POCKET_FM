@@ -30,6 +30,7 @@ class SeriesState(TypedDict, total=False):
     # Stage 2
     clarification: dict[str, Any]           # {questions: [...]} as generated
     clarification_answers: list[dict]       # creator's answers
+    confirmation_draft: dict[str, Any]      # preloaded in parallel with questions
 
     # Stage 3
     blueprint: dict[str, Any]
@@ -90,6 +91,7 @@ def new_state(series_id: str, idea: str) -> SeriesState:
         theme_tags=[],
         clarification={},
         clarification_answers=[],
+        confirmation_draft={},
         episodes=[],
         scripts={},
         voice_cast={},

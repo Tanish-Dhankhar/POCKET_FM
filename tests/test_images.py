@@ -6,6 +6,9 @@ and no file is written.
 """
 from __future__ import annotations
 
+import base64
+from types import SimpleNamespace
+
 import pytest
 
 from app import config, image_service, images, prompts, store
@@ -60,6 +63,32 @@ def test_generate_image_is_a_noop_when_disabled(monkeypatch, tmp_path):
     path = tmp_path / "thumbnail.png"
     assert images.generate_image("any prompt", path) is None
     assert not path.exists()
+
+
+def test_identical_image_prompt_uses_disk_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "IMAGE_ENABLED", True)
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(config, "MODEL_CACHE_ENABLED", True)
+    monkeypatch.setattr(config, "MODEL_CACHE_DIR", tmp_path / "model-cache")
+    monkeypatch.setattr(config, "MODEL_CACHE_TTL_SEC", 3600)
+
+    class ImageAPI:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, **kwargs):
+            self.calls += 1
+            payload = base64.b64encode(b"fake-png").decode("ascii")
+            return SimpleNamespace(data=[SimpleNamespace(b64_json=payload)])
+
+    api = ImageAPI()
+    monkeypatch.setattr(images, "_client", SimpleNamespace(images=api))
+
+    first = images.generate_image("same visual prompt", tmp_path / "one.png")
+    second = images.generate_image("same visual prompt", tmp_path / "two.png")
+
+    assert first.read_bytes() == second.read_bytes() == b"fake-png"
+    assert api.calls == 1
 
 
 def test_enabled_requires_both_the_flag_and_a_key(monkeypatch):

@@ -1,4 +1,5 @@
 import * as pipeline from './series'
+import * as studio from './studio'
 
 function requireStage(response, expected) {
   if (response?.stage !== expected) {
@@ -9,8 +10,18 @@ function requireStage(response, expected) {
 
 export async function startSeries({ idea, transcript = null }) {
   const extracted = requireStage(await pipeline.createSeries({ idea, transcript }), 'extract')
-  const clarified = requireStage(await pipeline.approve(extracted.series_id), 'clarify')
-  return { seriesId: extracted.series_id, questions: clarified.payload?.questions || [] }
+  // The backend has already generated the draft in parallel with the question
+  // bootstrap. Fetch it alongside the stage transition so there is no later wait.
+  const [clarified, confirm] = await Promise.all([
+    pipeline.approve(extracted.series_id),
+    studio.confirmCard(extracted.series_id),
+  ])
+  requireStage(clarified, 'clarify')
+  return {
+    seriesId: extracted.series_id,
+    questions: clarified.payload?.questions || [],
+    confirm,
+  }
 }
 
 export async function submitAnswers(seriesId, answers) {
@@ -22,6 +33,8 @@ export async function buildSeries(seriesId, config) {
     include_narrator: config.include_narrator,
     genre: config.genre,
     setting: config.setting,
+    ep_count: Number(config.ep_count),
+    ep_minutes: Number(config.ep_minutes),
   }), 'ep_config')
   // Stop on the episode_plan review. Approving it would trigger the old
   // all-episodes script node, while the product generates episodes on demand.

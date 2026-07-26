@@ -18,7 +18,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import config
+from . import config, model_cache
 
 _LOG = logging.getLogger(__name__)
 
@@ -93,19 +93,34 @@ def generate_image(prompt: str, path: Path, *, size: str | None = None) -> Path 
     if not enabled():
         return None
 
-    resp = _request(lambda: client().images.generate(
-        model=config.IMAGE_MODEL,
-        prompt=prompt,
-        size=size or config.IMAGE_SIZE,
-        quality=config.IMAGE_QUALITY,
-        n=1,
-    ))
+    resolved_size = size or config.IMAGE_SIZE
+    cache_key = model_cache.key("openai-image", {
+        "model": config.IMAGE_MODEL,
+        "prompt": prompt,
+        "size": resolved_size,
+        "quality": config.IMAGE_QUALITY,
+        "count": 1,
+    })
+    with model_cache.locked(cache_key):
+        cached = model_cache.load_bytes(cache_key)
+        if cached is not None:
+            _LOG.info("image_cache_hit path=%s model=%s", path.name, config.IMAGE_MODEL)
+            return _write_atomic(path, cached)
 
-    item = resp.data[0]
-    # gpt-image-1 always returns base64; the url field only appears on older models.
-    payload = getattr(item, "b64_json", None)
-    if not payload:
-        raise RuntimeError(f"{config.IMAGE_MODEL} returned no image data")
+        resp = _request(lambda: client().images.generate(
+            model=config.IMAGE_MODEL,
+            prompt=prompt,
+            size=resolved_size,
+            quality=config.IMAGE_QUALITY,
+            n=1,
+        ))
 
-    _LOG.info("image_generated path=%s model=%s", path.name, config.IMAGE_MODEL)
-    return _write_atomic(path, base64.b64decode(payload))
+        item = resp.data[0]
+        # gpt-image-1 always returns base64; url is present only on older models.
+        payload = getattr(item, "b64_json", None)
+        if not payload:
+            raise RuntimeError(f"{config.IMAGE_MODEL} returned no image data")
+        decoded = base64.b64decode(payload)
+        model_cache.save_bytes(cache_key, decoded)
+        _LOG.info("image_generated path=%s model=%s", path.name, config.IMAGE_MODEL)
+        return _write_atomic(path, decoded)

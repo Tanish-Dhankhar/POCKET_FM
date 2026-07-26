@@ -19,6 +19,11 @@ SYSTEM = (
 )
 
 
+def _json(value: Any) -> str:
+    """Compact context lowers input tokens and latency without losing fields."""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
 def _feedback_block(feedback: str) -> str:
     if not feedback.strip():
         return ""
@@ -32,11 +37,20 @@ def _feedback_block(feedback: str) -> str:
 # Stage 1 — Extract
 # ---------------------------------------------------------------------------
 def extract(idea: str, feedback: str = "") -> str:
+    n = config.CLARIFY_QUESTION_COUNT
     return (
-        "Read the creator's story idea and extract its metadata.\n\n"
-        "Infer the FULL cast of characters the idea implies — do not force a fixed "
-        "number; some ideas have two characters, some have ten. Give each a name "
-        "(invent fitting ones if unnamed), a role, and a short description.\n\n"
+        "Analyse the creator's initial idea once. Return provisional metadata and "
+        f"EXACTLY {n} high-value clarification questions.\n\n"
+        "Metadata: infer genre, theme, tone, language, setting, logline, and only the "
+        "characters the idea currently implies. Invent fitting names when needed.\n\n"
+        "Question contract:\n"
+        f"- Exactly {n} questions; each has EXACTLY 3 options.\n"
+        "- Each question is specific to this story and asks one unresolved decision "
+        "that materially changes plot, conflict, stakes, relationships, world rules, "
+        "or ending direction. Never ask for known metadata.\n"
+        "- Options are concrete, mutually distinct directions with short labels and "
+        "one-line details. Mark exactly one strongest option recommended=true; mark "
+        "the other two false. Set allow_free_text=true.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\""
         + _feedback_block(feedback)
     )
@@ -58,23 +72,24 @@ def clarify(idea: str, extracted: dict[str, Any], feedback: str = "") -> str:
         "protagonist's motivation, the nature of the central mystery/conflict, what the "
         "antagonist wants, the ending's direction, a key relationship, the level of "
         "supernatural vs grounded, the stakes.\n"
-        "- Give each question 3-4 options that are meaningfully DIFFERENT creative "
+        "- Give each question EXACTLY 3 options that are meaningfully DIFFERENT creative "
         "directions (not shades of the same answer). Each option needs a short concrete "
         "`label` and a one-line `detail` describing what it would mean for the story.\n"
         "- Mark EXACTLY ONE option per question as recommended=true — the one that would "
         "make the strongest, most engaging series. All others must be recommended=false.\n"
         "- Set allow_free_text to true for every question.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
-        f"ALREADY KNOWN (do not ask about these):\n{json.dumps(extracted, indent=2)}"
+        f"ALREADY KNOWN (do not ask about these):\n{_json(extracted)}"
         + _feedback_block(feedback)
     )
 
 
-def confirm_card(idea: str, extracted: dict[str, Any], answers: list[dict]) -> str:
-    """Cheap pre-blueprint summary for the wizard's confirm step."""
+def confirm_card(idea: str, feedback: str = "") -> str:
+    """Preload stable confirmation choices from the initial idea only."""
     return (
-        "Summarise this story into the few decisions a creator confirms before we "
-        "write the series.\n\n"
+        "Create a preliminary confirmation card from the INITIAL STORY IDEA only. "
+        "Do not invent answer-dependent twists; story classifications will be "
+        "reconciled with the detailed blueprint after clarification.\n\n"
         "Give it a short evocative TITLE (2-5 words) that suits the genre — this is "
         "the name the series will be known by, so make it memorable, not descriptive. "
         "Say whether the story genuinely benefits from a NARRATOR voice (true only if "
@@ -82,9 +97,8 @@ def confirm_card(idea: str, extracted: dict[str, Any], answers: list[dict]) -> s
         "Recommend a focused first-season episode count and an average episode length "
         "in minutes (5-15). Generate exactly four short GENRE TAGS and exactly four "
         "short THEME TAGS grounded in this specific story. Avoid generic filler.\n\n"
-        f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
-        f"EXTRACTED METADATA:\n{json.dumps(extracted, indent=2)}\n\n"
-        f"CREATOR'S ANSWERS:\n{json.dumps(answers, indent=2)}"
+        f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\""
+        + _feedback_block(feedback)
     )
 
 
@@ -102,18 +116,24 @@ def blueprint(idea: str, extracted: dict[str, Any], answers: list[dict],
             "existing characters/relationships consistent:\n" + joined
         )
     return (
-        "Write the complete SERIES BLUEPRINT — the foundation for the whole show.\n\n"
-        "Include: a sharp logline, the story world and its rules, the overall main "
-        "storyline, 3-6 major story beats (with the potential to run for many episodes), "
-        "the tone and theme, "
-        "and a full character roster. For every character give personality, useful "
+        "Build the authoritative SERIES BLUEPRINT from the initial idea and every "
+        "creator answer. Preserve their choices exactly.\n\n"
+        "First create a detailed `main_storyline` of roughly 600-900 words in 6-10 "
+        "coherent paragraphs. Trace cause and effect through setup, inciting incident, "
+        "escalating conflict, key revelations/reversals, character consequences, "
+        "climax, and intended resolution. Do not return a vague synopsis or episode "
+        "list. Then provide 6-10 ordered story beats.\n\n"
+        "Derive genre, exactly four genre tags, theme, exactly four theme tags, tone, "
+        "setting, language, and the full character roster from that developed plot. "
+        "For every character give personality, useful "
         "details, physical persona, backstory, relationships, and a distinct VOCAL "
         "SIGNATURE and VOCAL DIRECTION (pace, pitch, verbal tics) so "
-        "voices are instantly distinguishable in audio. Mark exactly one character as "
-        "the narrator ONLY if the story benefits from narration.\n\n"
+        "voices are instantly distinguishable in audio. Set is_narrator=true for at "
+        "most one character, and only when narration materially benefits the story; "
+        "otherwise set it false for everyone.\n\n"
         f"STORY IDEA:\n\"\"\"\n{idea.strip()}\n\"\"\"\n\n"
-        f"EXTRACTED METADATA:\n{json.dumps(extracted, indent=2)}\n\n"
-        f"CREATOR'S CLARIFICATION ANSWERS:\n{json.dumps(answers, indent=2)}"
+        f"PROVISIONAL METADATA (revise when answers imply a better choice):\n{_json(extracted)}\n\n"
+        f"CREATOR'S CLARIFICATION ANSWERS:\n{_json(answers)}"
         + arcs_block
         + _feedback_block(feedback)
     )
@@ -128,7 +148,7 @@ def ep_config(blueprint: dict[str, Any], feedback: str = "") -> str:
         "should have, based on the depth and scope of the story. Prefer a focused "
         "season (typically 6-12) that can each end on a strong cliffhanger. Explain "
         "your reasoning briefly.\n\n"
-        f"BLUEPRINT:\n{json.dumps(blueprint, indent=2)}"
+        f"BLUEPRINT:\n{_json(blueprint)}"
         + _feedback_block(feedback)
     )
 
@@ -150,9 +170,23 @@ def episode_plan(blueprint: dict[str, Any], ep_count: int, ep_minutes: int,
         "engaging material. EVERY episode must end on an emotionally-driven cliffhanger "
         "calibrated to the protagonist's state (not a mechanical shock). Keep the plot "
         "progressing so it stays binge-able.\n\n"
-        f"BLUEPRINT:\n{json.dumps(blueprint, indent=2)}"
+        f"BLUEPRINT:\n{_json(blueprint)}"
         + recap
         + _feedback_block(feedback)
+    )
+
+
+def emotional_curve(blueprint: dict[str, Any],
+                    episodes: list[dict[str, Any]]) -> str:
+    return (
+        "Track the three most important audience-facing emotions across this audio "
+        "series episode plan. Choose three short, distinct emotion labels. For every "
+        "episode return one point with the exact episode number and an intensity from "
+        "0 to 100 for each emotion. Include every supplied episode exactly once, name "
+        "the overall dominant emotion using one of the three labels, and summarize the "
+        "emotional progression in one concise sentence.\n\n"
+        f"BLUEPRINT:\n{_json(blueprint)}\n\n"
+        f"EPISODES:\n{_json(episodes)}"
     )
 
 
@@ -161,8 +195,9 @@ def episode_plan(blueprint: dict[str, Any], ep_count: int, ep_minutes: int,
 # ---------------------------------------------------------------------------
 def script(blueprint: dict[str, Any], episode: dict[str, Any],
            prior_recap: str = "", feedback: str = "",
-           include_narrator: bool | None = None) -> str:
-    tag_list = ", ".join(f"[{t}]" for t in config.EMOTION_TAGS)
+           include_narrator: bool | None = None,
+           ep_minutes: int | None = None) -> str:
+    tag_list = ", ".join(f"[{tag}]" for tag in config.EMOTION_TAGS)
     recap = f"\n\nSTORY SO FAR (for continuity):\n{prior_recap}" if prior_recap else ""
     narrator_rule = (
         "NARRATOR: Do not write narration lines. The creator explicitly chose no "
@@ -170,25 +205,38 @@ def script(blueprint: dict[str, Any], episode: dict[str, Any],
         if include_narrator is False else
         "NARRATOR: Use narration only when it materially improves clarity or pacing.\n\n"
     )
+    duration_rule = ""
+    if ep_minutes:
+        min_words = ep_minutes * 115
+        max_words = ep_minutes * 140
+        max_lines = ep_minutes * 15
+        duration_rule = (
+            f"DURATION: This is a {ep_minutes}-minute episode. Keep the complete "
+            f"spoken script between {min_words} and {max_words} words and at no more "
+            f"than {max_lines} lines. Count dialogue and narration together. Do not "
+            "inflate the line count with one- or two-word fragments; combine a "
+            "speaker's continuous thought into a natural utterance.\n\n"
+        )
     return (
         "Write the full SCRIPT for this episode as an ordered list of lines.\n\n"
         "Each line is either 'narration' (speaker 'Narrator') or 'dialogue' (speaker = "
         "a character name). Write for the ear: natural, spoken, short beats, rising "
         "tension. Keep 2-4 speaking characters in any given scene. Open with a hook in "
         "the first moments and land the episode's cliffhanger at the end.\n\n"
-        + narrator_rule +
+        + narrator_rule + duration_rule +
         "EMOTION — use SPARINGLY. Store delivery direction in the separate `emotion` "
         "field and keep `text` free of inline emotion prefixes. Use emotion=null for "
         "natural delivery. Only set it when delivery differs materially from the "
         "speaker's established voice, and never repeat it mechanically on adjacent "
-        f"lines. Allowed values only: {tag_list}. Use [pause] within text only for an "
+        f"lines. Allowed values only (store the name without brackets): {tag_list}. "
+        "Use [pause] within text only for an "
         "intentional silence, never as a default emotion.\n\n"
         "SOUND — keep it sparse. Leave 'sfx' as [] and 'music' as null for most lines. "
         "Only add an sfx hint for a concrete event the text mentions (thunder, door, "
         "footsteps). Only set 'music' (a mood word) on the FIRST line of a scene whose "
         "mood clearly calls for a bed. Silence is good.\n\n"
-        f"BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
-        f"THIS EPISODE:\n{json.dumps(episode, indent=2)}"
+        f"BLUEPRINT:\n{_json(blueprint)}\n\n"
+        f"THIS EPISODE:\n{_json(episode)}"
         + recap
         + _feedback_block(feedback)
     )
@@ -205,7 +253,7 @@ def voice_cast(characters: list[dict[str, Any]], feedback: str = "") -> str:
         "personality. Never reuse a voice for two characters if avoidable. Return the "
         "chosen voice_id (exactly as listed) and a short reason per character.\n\n"
         f"VOICE CATALOGUE (name: style):\n{catalogue}\n\n"
-        f"CHARACTERS:\n{json.dumps(characters, indent=2)}"
+        f"CHARACTERS:\n{_json(characters)}"
         + _feedback_block(feedback)
     )
 
@@ -301,13 +349,13 @@ def story_analysis(blueprint: dict[str, Any], genre_tags: list[str],
         "directions; threats are risks such as repetition, unclear rules, or weak "
         "audio-only comprehension.\n\n"
         "Classify the genre across exactly these seven categories: action, drama, "
-        "comedy, sci_fi, horror, thriller, romance. Values should total roughly 100. "
+        "comedy, sci_fi, horror, thriller, romance. Values must total exactly 100. "
         "Return exactly four genre tags and exactly four weighted theme tags; theme "
-        "percentages should also total roughly 100. Preserve creator-confirmed tags "
+        "percentages must also total exactly 100. Preserve creator-confirmed tags "
         "when they fit the blueprint.\n\n"
-        f"CONFIRMED GENRE TAGS: {json.dumps(genre_tags)}\n"
-        f"CONFIRMED THEME TAGS: {json.dumps(theme_tags)}\n"
-        f"BLUEPRINT:\n{json.dumps(blueprint, indent=2)}"
+        f"CONFIRMED GENRE TAGS: {_json(genre_tags)}\n"
+        f"CONFIRMED THEME TAGS: {_json(theme_tags)}\n"
+        f"BLUEPRINT:\n{_json(blueprint)}"
         + _feedback_block(instruction)
     )
 
@@ -320,9 +368,9 @@ def episode_evaluation(blueprint: dict[str, Any], outline: dict[str, Any],
         "emotional escalation, clarity without visuals, and cliffhanger strength where "
         "relevant. For every point provide a short category, an honest assessment, and "
         "one concrete suggestion. Do not praise generically or rewrite the script.\n\n"
-        f"SERIES BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
-        f"EPISODE OUTLINE:\n{json.dumps(outline, indent=2)}\n\n"
-        f"SCRIPT:\n{json.dumps(script_lines, indent=2)}"
+        f"SERIES BLUEPRINT:\n{_json(blueprint)}\n\n"
+        f"EPISODE OUTLINE:\n{_json(outline)}\n\n"
+        f"SCRIPT:\n{_json(script_lines)}"
     )
 
 

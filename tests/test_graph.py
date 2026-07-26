@@ -89,8 +89,23 @@ def test_clarify_always_gates_with_four_questions(graph, offline):
     assert seen == ["extract", "clarify"]
     payload = res["__interrupt__"][0].value["payload"]
     assert len(payload["questions"]) == 4
+    assert all(len(q["options"]) == 3 for q in payload["questions"])
     assert all(sum(bool(o["recommended"]) for o in q["options"]) == 1
                for q in payload["questions"])
+
+
+def test_questions_are_reused_from_the_single_bootstrap_call(graph, offline):
+    res = graph.invoke(new_state("one-call", "A nurse and a ghost."), _cfg("one-call"))
+    assert _stage_of(res) == "extract"
+    before = len(offline["llm"].calls)
+
+    res = graph.invoke(Command(resume={"action": "approve"}), _cfg("one-call"))
+
+    assert _stage_of(res) == "clarify"
+    assert len(offline["llm"].calls) == before
+    names = [name for name, _ in offline["llm"].calls]
+    assert names.count("ExtractResult") == 1
+    assert names.count("ConfirmCard") == 1
 
 
 def test_regenerate_reruns_generation_with_the_note(graph, offline):

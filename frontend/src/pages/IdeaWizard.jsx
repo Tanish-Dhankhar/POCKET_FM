@@ -52,7 +52,11 @@ export default function IdeaWizard({ mode }) {
     try {
       const result = await flow.startSeries({idea:wizard.idea,transcript:mode === 'mic' ? wizard.transcript : null})
       const answers = result.questions.map((question) => ({question:question.question,answer:question.options?.find((option) => option.recommended)?.label || question.options?.[0]?.label || ''}))
-      wizard.set({seriesId:result.seriesId,questions:result.questions,answers})
+      const card = result.confirm || {}
+      wizard.set({
+        seriesId:result.seriesId, questions:result.questions, answers,
+        confirm:{title:card.title || '',genre:card.genre || '',setting:card.setting || '',include_narrator:Boolean(card.narrator_suggested),ep_count:card.recommended_ep_count || 6,ep_minutes:card.recommended_ep_minutes || 10,genre_tags:card.genre_tags || [],theme_tags:card.theme_tags || []},
+      })
       if (wizard.sourceBlob) studio.uploadInputAudio(result.seriesId,wizard.sourceBlob).catch(() => {})
       setQuestionIndex(0); setStage('questions')
     } catch (e) { setError(e.message) } finally { setBusy(false); setAnalyzing(false) }
@@ -62,9 +66,17 @@ export default function IdeaWizard({ mode }) {
     if (questionIndex < wizard.questions.length - 1) { setQuestionIndex((value) => value + 1); return }
     setBusy(true); setError('')
     try {
-      await flow.submitAnswers(wizard.seriesId,wizard.answers)
-      const card = await studio.confirmCard(wizard.seriesId)
-      wizard.set({confirm:{title:card.title,genre:card.genre,setting:card.setting,include_narrator:Boolean(card.narrator_suggested),ep_count:card.recommended_ep_count,ep_minutes:card.recommended_ep_minutes,genre_tags:card.genre_tags || [],theme_tags:card.theme_tags || []}})
+      const review = await flow.submitAnswers(wizard.seriesId,wizard.answers)
+      const blueprint = review.payload?.blueprint || {}
+      // Sol has now developed the plot from the creator's answers. Reconcile the
+      // preloaded card with its authoritative classifications without another call.
+      wizard.set({confirm:{
+        ...wizard.confirm,
+        genre:blueprint.genre || wizard.confirm?.genre || '',
+        setting:blueprint.setting || wizard.confirm?.setting || '',
+        genre_tags:blueprint.genre_tags || wizard.confirm?.genre_tags || [],
+        theme_tags:blueprint.theme_tags || wizard.confirm?.theme_tags || [],
+      }})
       setStage('confirm')
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }

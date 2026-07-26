@@ -6,6 +6,7 @@ enforcement logic and the real audio engine without touching the network.
 """
 from __future__ import annotations
 
+import re
 import struct
 import wave
 from pathlib import Path
@@ -24,6 +25,9 @@ config.DATABRICKS_ENABLED = False
 # should ever spend money on an image API. Tests that exercise the image code
 # path enable it explicitly via monkeypatch.
 config.IMAGE_ENABLED = False
+# Unit tests explicitly enable caching with an isolated temporary directory when
+# they exercise it; ordinary tests must never reuse data from previous runs.
+config.MODEL_CACHE_ENABLED = False
 
 
 # --------------------------------------------------------------------------- #
@@ -33,7 +37,12 @@ def _character(name: str, role: str) -> dict:
     return {
         "name": name, "role": role, "description": f"{name} is the {role}.",
         "personality": "stubborn, warm", "relationships": [f"knows the other one"],
-        "vocal_signature": "low, deliberate", "is_narrator": name == "Narrator",
+        "details": "Wants the truth but fears what it will cost.",
+        "physical_persona": "Watchful posture and tired eyes.",
+        "backstory": "The hospital shaped their most important loss.",
+        "vocal_signature": "low, deliberate",
+        "vocal_direction": "Controlled until pressure breaks the rhythm.",
+        "is_narrator": name == "Narrator",
     }
 
 
@@ -58,12 +67,24 @@ class FakeLLM:
         self.calls: list[tuple[str, str]] = []   # (schema name, feedback-bearing prompt)
         self.clarify_questions = 1
 
-    def __call__(self, prompt, schema, *, thinking=None, system=None):
+    def __call__(self, prompt, schema, *, thinking=None, system=None, **kwargs):
         self.calls.append((schema.__name__, prompt))
         return getattr(self, f"_{schema.__name__}")(prompt)
 
     # -- per-schema builders -------------------------------------------------
     def _ExtractResult(self, prompt):
+        questions = [
+            schemas.ClarifyQuestion(
+                question=f"Story decision {i + 1}: is the ghost real or psychological?",
+                options=[
+                    schemas.ClarifyOption(label="Real", detail="Truly supernatural.", recommended=True),
+                    schemas.ClarifyOption(label="Psychological", detail="Grief-driven.", recommended=False),
+                    schemas.ClarifyOption(label="Ambiguous", detail="Evidence supports both.", recommended=False),
+                ],
+                allow_free_text=True,
+            )
+            for i in range(4)
+        ]
         return schemas.ExtractResult(
             genre="supernatural thriller", theme="grief and denial",
             tone="tense, intimate", language="English",
@@ -75,14 +96,18 @@ class FakeLLM:
                 schemas.DetectedCharacter(name="Benji", role="skeptic",
                                           description="Security guard."),
             ],
+            questions=questions,
         )
 
     def _ClarifyResult(self, prompt):
         qs = [
             schemas.ClarifyQuestion(
                 question=f"Story decision {i + 1}: is the ghost real or psychological?",
-                options=[schemas.ClarifyOption(label="A. Real", detail="Truly supernatural.", recommended=True),
-                         schemas.ClarifyOption(label="B. In her head", detail="Grief-driven.")],
+                options=[
+                    schemas.ClarifyOption(label="A. Real", detail="Truly supernatural.", recommended=True),
+                    schemas.ClarifyOption(label="B. In her head", detail="Grief-driven."),
+                    schemas.ClarifyOption(label="C. Ambiguous", detail="Both readings remain possible."),
+                ],
                 allow_free_text=True,
             )
             for i in range(4)
@@ -93,8 +118,21 @@ class FakeLLM:
         return schemas.Blueprint(
             logline="Three nights, one room, one impossible patient.",
             story_world="A decaying county hospital scheduled for demolition.",
-            main_storyline="Maya uncovers what the hospital buried in 4B.",
+            main_storyline=(
+                "Maya uncovers what the hospital buried in 4B, and each discovery "
+                "forces her to confront the grief she has denied. " * 28
+            ),
+            story_beats=[
+                "Maya hears room 4B", "Benji doubts her", "The footage changes",
+                "A buried patient file appears", "Maya confronts the administrator",
+                "The ghost reveals the final truth",
+            ],
+            genre="supernatural thriller",
+            genre_tags=["Mystery", "Haunting", "Suspense", "Investigation"],
             tone="tense, intimate", theme="grief and denial",
+            theme_tags=["Grief", "Denial", "Memory", "Courage"],
+            setting="a small county hospital, present day",
+            language="English",
             characters=[
                 schemas.CharacterProfile(**_character("Maya", "protagonist")),
                 schemas.CharacterProfile(**_character("Benji", "skeptic")),
@@ -173,6 +211,23 @@ class FakeLLM:
         return schemas.SoundPlan(
             music=[schemas.MusicCue(start_line=0, end_line=4, mood="tense")],
             sfx=[schemas.SfxCue(line=3, name="door_creak")],
+        )
+
+    def _EmotionCurve(self, prompt):
+        numbers = sorted({int(value) for value in re.findall(r'"number"\s*:\s*(\d+)', prompt)})
+        return schemas.EmotionCurve(
+            emotion_1_label="Dread", emotion_2_label="Hope",
+            emotion_3_label="Resolve", dominant_emotion="Dread",
+            summary="Dread rises as hope and resolve fight back.",
+            points=[
+                schemas.EmotionCurvePoint(
+                    episode=number,
+                    emotion_1=min(100, 35 + number * 10),
+                    emotion_2=max(0, 65 - number * 5),
+                    emotion_3=min(100, 20 + number * 8),
+                )
+                for number in numbers
+            ],
         )
 
 
