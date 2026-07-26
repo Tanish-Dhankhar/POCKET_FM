@@ -87,3 +87,61 @@ def test_at_most_five_story_jobs_can_run_at_once(monkeypatch):
     for job in started:
         _wait_for(job["id"], "done")
     _wait_for(images["id"], "done")
+
+
+def test_synchronous_pipeline_requests_share_the_story_budget(monkeypatch):
+    """Wizard traffic counts too: 5 concurrent creators fill the studio."""
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 2)
+
+    with jobs.story_slot():
+        with jobs.story_slot():
+            assert jobs.summary()["story_active"] == 2
+            with pytest.raises(jobs.QueueFullError, match="at most 2 stories"):
+                with jobs.story_slot():
+                    pass
+        # Leaving a slot frees capacity for the next creator immediately.
+        assert jobs.summary()["story_active"] == 1
+        with jobs.story_slot():
+            pass
+
+    assert jobs.summary()["story_active"] == 0
+
+
+def test_a_held_slot_blocks_a_background_story_job(monkeypatch):
+    """A synchronous creator and a background job cannot both exceed the cap."""
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+
+    with jobs.story_slot():
+        with pytest.raises(jobs.QueueFullError):
+            jobs.start_or_rejoin(
+                "episode", lambda handle: {"ok": True},
+                dedupe_key=("episode", "blocked-series", 1),
+                series_id="blocked-series", number=1,
+            )
+
+    job = jobs.start_or_rejoin(
+        "episode", lambda handle: {"ok": True},
+        dedupe_key=("episode", "blocked-series", 1),
+        series_id="blocked-series", number=1,
+    )
+    assert _wait_for(job["id"], "done")["result"] == {"ok": True}
+
+
+def test_every_ai_job_kind_counts_against_the_story_budget(monkeypatch):
+    """Remixes and the rest of the AI-backed kinds share the same cap."""
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+
+    for kind in sorted(config.STORY_JOB_KINDS):
+        with jobs.story_slot():
+            with pytest.raises(jobs.QueueFullError):
+                jobs.start_or_rejoin(
+                    kind, lambda handle: {"ok": True},
+                    dedupe_key=(kind, f"budget-{kind}"),
+                    series_id=f"budget-{kind}",
+                )
+
+
+def test_capacity_detail_carries_the_code_the_ui_matches_on():
+    detail = jobs.capacity_detail(jobs.QueueFullError("full"))
+    assert detail["code"] == jobs.CAPACITY_CODE
+    assert detail["limit"] == config.STORY_MAX_CONCURRENCY

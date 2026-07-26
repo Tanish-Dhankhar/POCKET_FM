@@ -19,7 +19,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from . import config, jobs, store
-from .api_store import router as store_router
+from .api_store import capacity_error, router as store_router
 from .graph import GRAPH
 from .state import new_state
 
@@ -99,7 +99,17 @@ def _pending(series_id: str, result: dict) -> dict:
 
 
 def _run(series_id: str, inp: Any) -> dict:
-    result = GRAPH.invoke(inp, _cfg(series_id))
+    """Advance the pipeline while holding one of the story slots.
+
+    Every wizard step is real generation work, so it counts towards the same
+    STORY_MAX_CONCURRENCY budget as background jobs; creator number six is told
+    to come back shortly rather than queuing behind an exhausted provider.
+    """
+    try:
+        with jobs.story_slot():
+            result = GRAPH.invoke(inp, _cfg(series_id))
+    except jobs.QueueFullError as exc:
+        raise capacity_error(exc) from exc
     return _pending(series_id, result)
 
 

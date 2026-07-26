@@ -7,6 +7,7 @@ import Building from './pages/Building'
 import Ideaboard from './pages/Ideaboard'
 import Episode from './pages/Episode'
 import Refining from './pages/Refining'
+import Toaster from './components/Toaster'
 
 const page = {
   initial: { opacity: 0, y: 8 },
@@ -22,18 +23,22 @@ function Frame({ children }) {
 export default function App() {
   const location = useLocation()
   return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<Frame><Dashboard /></Frame>} />
-        <Route path="/new" element={<Frame><NewSeries /></Frame>} />
-        <Route path="/new/write" element={<Frame><IdeaWizard mode="write" /></Frame>} />
-        <Route path="/new/mic" element={<Frame><IdeaWizard mode="mic" /></Frame>} />
-        <Route path="/new/building" element={<Frame><Building /></Frame>} />
-        <Route path="/series/:id" element={<Frame><Ideaboard /></Frame>} />
-        <Route path="/series/:id/refining" element={<Frame><Refining /></Frame>} />
-        <Route path="/series/:id/episodes/:number" element={<Frame><Episode /></Frame>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AnimatePresence>
+    <>
+      <AnimatePresence mode="wait">
+        <Routes location={location} key={location.pathname}>
+          <Route path="/" element={<Frame><Dashboard /></Frame>} />
+          <Route path="/new" element={<Frame><NewSeries /></Frame>} />
+          <Route path="/new/write" element={<Frame><IdeaWizard mode="write" /></Frame>} />
+          <Route path="/new/mic" element={<Frame><IdeaWizard mode="mic" /></Frame>} />
+          <Route path="/new/building" element={<Frame><Building /></Frame>} />
+          <Route path="/series/:id" element={<Frame><Ideaboard /></Frame>} />
+          <Route path="/series/:id/refining" element={<Frame><Refining /></Frame>} />
+          <Route path="/series/:id/episodes/:number" element={<Frame><Episode /></Frame>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AnimatePresence>
+      {/* Outside the route AnimatePresence so a navigation never eats a toast. */}
+      <Toaster />
+    </>
   )
 }

@@ -95,6 +95,11 @@ class RemixBody(BaseModel):
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+def capacity_error(exc: jobs.QueueFullError) -> HTTPException:
+    """429 carrying a code the UI matches on to raise its at-capacity toast."""
+    return HTTPException(429, jobs.capacity_detail(exc), headers={"Retry-After": "30"})
+
+
 def _require(series_id: str) -> None:
     if not store.series_dir(series_id).exists():
         raise HTTPException(404, f"unknown series {series_id}")
@@ -178,21 +183,6 @@ def patch_blueprint(series_id: str, body: PlotPatch) -> dict:
     store.mark_emotional_curve_stale(series_id)
     store.save_index(series_id)
     return store.load_blueprint(series_id)
-
-
-@router.get("/series/{series_id}/emotional-curve")
-def get_emotional_curve(series_id: str) -> dict:
-    _require(series_id)
-    return store.load_emotional_curve(series_id)
-
-
-@router.post("/series/{series_id}/emotional-curve/regenerate", status_code=202)
-def regenerate_emotional_curve(series_id: str) -> dict:
-    _require(series_id)
-    try:
-        return story_service.start_emotional_curve_job(series_id)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -335,7 +325,7 @@ def generate_episode(series_id: str, number: int,
         return episode_service.start_episode_job(
             series_id, number, force_script=force_script)
     except jobs.QueueFullError as exc:
-        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
+        raise capacity_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -352,6 +342,8 @@ def remix_episode(series_id: str, number: int, body: RemixBody) -> dict:
     try:
         return episode_service.start_episode_remix_job(
             series_id, number, instruction)
+    except jobs.QueueFullError as exc:
+        raise capacity_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -387,10 +379,15 @@ def confirm_card(series_id: str) -> dict:
     inp = store.load_input(series_id)
     card = store.load_confirmation_draft(series_id)
     if not card:
-        card = generate_structured(
-            prompts.confirm_card(inp["idea"]),
-            schemas.ConfirmCard, task="confirm_card", system=prompts.SYSTEM,
-        ).model_dump()
+        # Only the uncached fallback reaches the model, so only it needs a slot.
+        try:
+            with jobs.story_slot():
+                card = generate_structured(
+                    prompts.confirm_card(inp["idea"]),
+                    schemas.ConfirmCard, task="confirm_card", system=prompts.SYSTEM,
+                ).model_dump()
+        except jobs.QueueFullError as exc:
+            raise capacity_error(exc) from exc
         store.save_confirmation_draft(series_id, card)
 
     store.save_index(series_id, title=card["title"], genre=card["genre"])
@@ -425,7 +422,7 @@ def regenerate_analysis(series_id: str) -> dict:
     try:
         return story_service.start_analysis_job(series_id)
     except jobs.QueueFullError as exc:
-        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
+        raise capacity_error(exc) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -450,7 +447,7 @@ def regenerate_emotional_curve(series_id: str) -> dict:
     try:
         return story_service.start_emotional_curve_job(series_id)
     except jobs.QueueFullError as exc:
-        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
+        raise capacity_error(exc) from exc
 
 
 @router.post("/series/{series_id}/refine", status_code=202)
@@ -462,7 +459,7 @@ def refine_series(series_id: str, body: RefinementBody) -> dict:
     try:
         return story_service.start_refinement_job(series_id, instruction)
     except jobs.QueueFullError as exc:
-        raise HTTPException(429, str(exc), headers={"Retry-After": "30"}) from exc
+        raise capacity_error(exc) from exc
 
 
 @router.post("/series/{series_id}/episodes/{number}/evaluate")
@@ -471,7 +468,10 @@ def evaluate_episode(series_id: str, number: int) -> dict:
     if number not in store.episode_numbers(series_id):
         raise HTTPException(404, f"unknown episode {number}")
     try:
-        return story_service.evaluate_episode(series_id, number)
+        with jobs.story_slot():
+            return story_service.evaluate_episode(series_id, number)
+    except jobs.QueueFullError as exc:
+        raise capacity_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -503,7 +503,10 @@ def voice_sample(voice_id: str) -> FileResponse:
     path = config.ASSETS_DIR / "voice_samples" / f"{voice_id}.wav"
     if not path.exists():
         try:
-            render_line(_SAMPLE_LINE, voice_id, path, cache_dir=config.TTS_CACHE_DIR)
+            with jobs.story_slot():
+                render_line(_SAMPLE_LINE, voice_id, path, cache_dir=config.TTS_CACHE_DIR)
+        except jobs.QueueFullError as exc:
+            raise capacity_error(exc) from exc
         except Exception as exc:  # rate limit / model error
             raise HTTPException(503, f"could not render sample: {exc}") from exc
     return FileResponse(path, media_type="audio/wav", filename=f"{voice_id}.wav")
@@ -534,7 +537,10 @@ async def transcribe(file: UploadFile = File(...)) -> dict:
         raise HTTPException(400, "empty audio upload")
     mime = file.content_type or "audio/webm"
     try:
-        text = await run_in_threadpool(transcribe_audio, data, mime)
+        with jobs.story_slot():
+            text = await run_in_threadpool(transcribe_audio, data, mime)
+    except jobs.QueueFullError as exc:
+        raise capacity_error(exc) from exc
     except Exception as exc:
         raise HTTPException(502, f"transcription failed: {exc}") from exc
     if not text.strip():

@@ -170,10 +170,14 @@ MODEL_MAX_CONCURRENCY = max(1, int(os.environ.get("MODEL_MAX_CONCURRENCY", "8"))
 JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "5")))
 JOB_MAX_QUEUE = max(1, int(os.environ.get("JOB_MAX_QUEUE", "100")))
 JOB_MAX_RETAINED = max(1, int(os.environ.get("JOB_MAX_RETAINED", "200")))
-# Cap how many story-generation jobs (episode / analysis / refinement /
-# emotional curve) may be queued or running at once. A 6th request gets 429.
+# Cap how much AI work users can trigger at once. Background story jobs and
+# synchronous AI requests (wizard steps, confirm card, evaluation, voice
+# samples, transcription) all draw from this budget; the request over the
+# limit gets a 429 the frontend turns into an at-capacity toast.
 STORY_MAX_CONCURRENCY = max(1, int(os.environ.get("STORY_MAX_CONCURRENCY", "5")))
-STORY_JOB_KINDS = frozenset({"episode", "analysis", "refinement", "emotional_curve"})
+STORY_JOB_KINDS = frozenset({
+    "episode", "episode_remix", "analysis", "refinement", "emotional_curve",
+})
 
 # Input guardrails cap memory and provider work without affecting normal ideas,
 # recordings, or scripts.
