@@ -80,6 +80,23 @@ def test_clarify_result_requires_exactly_four_questions():
         schemas.ClarifyResult(questions=[])
 
 
+def test_emotion_curve_point_rejects_out_of_range_intensity():
+    with pytest.raises(ValueError):
+        schemas.EmotionCurvePoint(episode=1, emotion_1=101, emotion_2=0, emotion_3=0)
+    with pytest.raises(ValueError):
+        schemas.EmotionCurvePoint(episode=1, emotion_1=-1, emotion_2=0, emotion_3=0)
+
+
+def test_emotion_curve_accepts_a_full_episode_arc():
+    curve = schemas.EmotionCurve(
+        emotion_1_label="Tension", emotion_2_label="Grief", emotion_3_label="Hope",
+        dominant_emotion="Tension", summary="Rises through the middle, breaks at the end.",
+        points=[schemas.EmotionCurvePoint(episode=i, emotion_1=50, emotion_2=20, emotion_3=10)
+                for i in range(1, 4)],
+    )
+    assert len(curve.points) == 3
+
+
 # --------------------------------------------------------------------------- #
 # prompts
 # --------------------------------------------------------------------------- #
@@ -124,3 +141,16 @@ def test_blueprint_prompt_carries_continuation_arcs():
     p = prompts.blueprint("idea", {}, [], arcs=["Maya returns a decade later."])
     assert "CONTINUATION PLOTS" in p
     assert "Maya returns a decade later." in p
+
+
+def test_emotional_curve_prompt_lists_every_episode():
+    episodes = [
+        {"number": 1, "title": "Night One", "summary": "Maya starts the case.",
+         "emotional_focus": "dread", "cliffhanger": "The door opens."},
+        {"number": 2, "title": "Night Two", "summary": "The footage lies.",
+         "emotional_focus": "doubt", "cliffhanger": "A second victim appears."},
+    ]
+    p = prompts.emotional_curve({"genre": "horror", "theme": "grief"}, episodes)
+    assert "Night One" in p and "Night Two" in p
+    assert "THREE emotions" in p
+    assert "0-100" in p

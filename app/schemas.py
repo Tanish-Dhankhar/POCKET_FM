@@ -239,3 +239,24 @@ class EvaluationPoint(BaseModel):
 
 class EpisodeEvaluation(BaseModel):
     points: list[EvaluationPoint] = Field(min_length=3, max_length=6)
+
+
+# ---------------------------------------------------------------------------
+# Emotional curve — top-3 tracked emotions, scored per episode
+# ---------------------------------------------------------------------------
+class EmotionCurvePoint(BaseModel):
+    episode: int = Field(description="episode number, matching the plan")
+    emotion_1: int = Field(ge=0, le=100, description="intensity of emotion_1_label in this episode")
+    emotion_2: int = Field(ge=0, le=100, description="intensity of emotion_2_label in this episode")
+    emotion_3: int = Field(ge=0, le=100, description="intensity of emotion_3_label in this episode")
+
+
+class EmotionCurve(BaseModel):
+    emotion_1_label: str = Field(description="short, story-specific emotion name, e.g. 'Tension'")
+    emotion_2_label: str = Field(description="short, story-specific emotion name")
+    emotion_3_label: str = Field(description="short, story-specific emotion name")
+    dominant_emotion: str = Field(description="must exactly match one of the three labels above")
+    summary: str = Field(description="2-3 sentences on how the emotional arc rises and falls")
+    points: list[EmotionCurvePoint] = Field(
+        description="one entry per episode in the plan, in episode order"
+    )

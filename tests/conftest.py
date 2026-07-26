@@ -6,6 +6,7 @@ enforcement logic and the real audio engine without touching the network.
 """
 from __future__ import annotations
 
+import base64
 import struct
 import wave
 from pathlib import Path
@@ -13,6 +14,13 @@ from pathlib import Path
 import pytest
 
 from app import config, schemas
+
+# A minimal, valid 1x1 PNG — enough for tests to exercise real file I/O without
+# a real image-generation call.
+_TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -121,6 +129,21 @@ class FakeLLM:
             ],
         )
 
+    def _EmotionCurve(self, prompt):
+        # Honour however many episodes were actually listed in the prompt.
+        count = prompt.count("emotional focus:")
+        count = count or 1
+        return schemas.EmotionCurve(
+            emotion_1_label="Tension", emotion_2_label="Grief", emotion_3_label="Hope",
+            dominant_emotion="Tension",
+            summary="Tension climbs through the middle nights before hope breaks through.",
+            points=[
+                schemas.EmotionCurvePoint(
+                    episode=i, emotion_1=30 + i * 10, emotion_2=40, emotion_3=15 + i * 5,
+                ) for i in range(1, count + 1)
+            ],
+        )
+
     def _EpisodeEvaluation(self, prompt):
         return schemas.EpisodeEvaluation(points=[
             schemas.EvaluationPoint(category="Hook", assessment="Immediate tension.", suggestion="Keep the first sound unexplained."),
@@ -195,6 +218,24 @@ class FakeTTS:
 
 
 # --------------------------------------------------------------------------- #
+# fake image generation — writes a real, valid PNG so downstream code that
+# checks file existence/content-type is genuinely exercised
+# --------------------------------------------------------------------------- #
+class FakeImages:
+    """Stand-in for images.render_portrait."""
+
+    def __init__(self) -> None:
+        self.rendered: list[str] = []   # prompts
+
+    def __call__(self, prompt, out_path):
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(_TINY_PNG)
+        self.rendered.append(prompt)
+        return out_path
+
+
+# --------------------------------------------------------------------------- #
 # fixtures
 # --------------------------------------------------------------------------- #
 @pytest.fixture
@@ -216,6 +257,13 @@ def fake_tts(monkeypatch) -> FakeTTS:
 
 
 @pytest.fixture
+def fake_images(monkeypatch) -> FakeImages:
+    fake = FakeImages()
+    monkeypatch.setattr("app.character_art.images.render_portrait", fake)
+    return fake
+
+
+@pytest.fixture
 def tmp_output(monkeypatch, tmp_path) -> Path:
     """Redirect all rendered artifacts into a temp dir."""
     out = tmp_path / "output"
@@ -225,6 +273,6 @@ def tmp_output(monkeypatch, tmp_path) -> Path:
 
 
 @pytest.fixture
-def offline(fake_llm, fake_tts, tmp_output):
+def offline(fake_llm, fake_tts, fake_images, tmp_output):
     """Everything stubbed: the full pipeline runs with no network and no cost."""
-    return {"llm": fake_llm, "tts": fake_tts, "output": tmp_output}
+    return {"llm": fake_llm, "tts": fake_tts, "images": fake_images, "output": tmp_output}

@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import config, episode_service, jobs, prompts, schemas, store, story_service
+from . import character_art, config, episode_service, jobs, prompts, schemas, store, story_service
 from .llm import generate_structured, transcribe_audio
 from .tts import render_line
 
@@ -150,6 +150,8 @@ def patch_blueprint(series_id: str, body: PlotPatch) -> dict:
     if swot:
         swot["stale"] = True
         store.write_json(swot_path, swot)
+    store.mark_emotional_curve_stale(series_id)
+    store.mark_all_character_portraits_stale(series_id)
     store.save_index(series_id)
     return store.load_blueprint(series_id)
 
@@ -163,6 +165,10 @@ def get_characters(series_id: str) -> dict:
     return {"characters": store.load_characters(series_id)}
 
 
+_PORTRAIT_FIELDS = {"name", "gender", "description", "personality",
+                    "physical_persona", "backstory", "is_narrator"}
+
+
 @router.patch("/series/{series_id}/characters/{key}")
 def patch_character(series_id: str, key: str, body: CharacterPatch) -> dict:
     """`key` is the file stem — a character slug, or 'narrator'."""
@@ -171,14 +177,53 @@ def patch_character(series_id: str, key: str, body: CharacterPatch) -> dict:
     current = store.read_json(path, None)
     if current is None:
         raise HTTPException(404, f"unknown character '{key}'")
-    updated = {**current, **body.model_dump(exclude_none=True)}
+    patch = body.model_dump(exclude_none=True)
+    updated = {**current, **patch}
     # A rename must move the file so the slug stays in sync with the name.
     new_key = "narrator" if updated.get("is_narrator") else store.slug(updated["name"])
     if new_key != key:
         path.unlink(missing_ok=True)
+        old_portrait = store.character_portrait_path(series_id, key)
+        old_portrait.unlink(missing_ok=True)
+        updated.pop("portrait_generated_at", None)
+        updated["portrait_stale"] = False
+    elif _PORTRAIT_FIELDS.intersection(patch) and updated.get("portrait_generated_at"):
+        updated["portrait_stale"] = True
     store.save_character(series_id, updated)
     store.save_index(series_id)
     return updated
+
+
+@router.get("/series/{series_id}/characters/{key}/portrait")
+def get_character_portrait(series_id: str, key: str) -> FileResponse:
+    """A character's concept-art portrait, rendered lazily on first request.
+
+    Mirrors /voices/{id}/sample: the first load costs one Gemini image call,
+    every later load is an instant file read — until the character or the
+    story's genre/tone/setting changes, which flips it stale for one more render.
+    """
+    _require(series_id)
+    try:
+        path = character_art.ensure_portrait(series_id, key)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:  # rate limit / model error
+        raise HTTPException(503, f"could not render portrait: {exc}") from exc
+    return FileResponse(path, media_type="image/png", filename=f"{key}.png")
+
+
+@router.post("/series/{series_id}/characters/{key}/portrait/regenerate")
+def regenerate_character_portrait(series_id: str, key: str) -> dict:
+    _require(series_id)
+    try:
+        character_art.ensure_portrait(series_id, key, force=True)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, f"could not render portrait: {exc}") from exc
+    character = store.load_character(series_id, key) or {}
+    return {"key": key, "generated_at": character.get("portrait_generated_at"),
+            "stale": character.get("portrait_stale", False)}
 
 
 # --------------------------------------------------------------------------- #
@@ -228,6 +273,7 @@ def put_outline(series_id: str, number: int, body: OutlinePatch) -> dict:
     _require(series_id)
     outline = {**body.outline, "number": number}
     store.save_episode_outline(series_id, outline)
+    store.mark_emotional_curve_stale(series_id)
     store.save_index(series_id)
     return outline
 
@@ -333,6 +379,28 @@ def save_confirmations(series_id: str, body: ConfirmationBody) -> dict:
 def regenerate_analysis(series_id: str) -> dict:
     _require(series_id)
     return story_service.start_analysis_job(series_id)
+
+
+# --------------------------------------------------------------------------- #
+# emotional curve (top-3 tracked emotions across the episode plan)
+# --------------------------------------------------------------------------- #
+@router.get("/series/{series_id}/emotional-curve")
+def get_emotional_curve(series_id: str) -> dict:
+    _require(series_id)
+    return store.load_emotional_curve(series_id)
+
+
+@router.post("/series/{series_id}/emotional-curve/regenerate", status_code=202)
+def regenerate_emotional_curve(series_id: str) -> dict:
+    """Kick off (or rejoin) the job that charts the top-3 emotions per episode.
+
+    Requires the episode plan to exist — the curve is scored per planned episode,
+    so there is nothing to chart until /series has advanced past episode_plan.
+    """
+    _require(series_id)
+    if not store.episode_numbers(series_id):
+        raise HTTPException(409, "generate the episode plan before building an emotional curve")
+    return story_service.start_emotional_curve_job(series_id)
 
 
 @router.post("/series/{series_id}/refine", status_code=202)

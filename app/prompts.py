@@ -257,6 +257,63 @@ def story_analysis(blueprint: dict[str, Any], genre_tags: list[str],
     )
 
 
+def emotional_curve(blueprint: dict[str, Any], episodes: list[dict[str, Any]],
+                    instruction: str = "") -> str:
+    numbered = "\n".join(
+        f"{ep.get('number')}. {ep.get('title', '')} — {ep.get('summary', '')} "
+        f"(emotional focus: {ep.get('emotional_focus', '')}; "
+        f"cliffhanger: {ep.get('cliffhanger', '')})"
+        for ep in episodes
+    )
+    return (
+        "Track the emotional arc of this audio series across its full episode plan, "
+        "genre, and storyline.\n\n"
+        "First, identify the THREE emotions that most define this specific story's "
+        "dramatic experience (e.g. Tension, Grief, Hope, Betrayal, Longing — pick "
+        "words that fit THIS story and genre, never a generic fixed set).\n\n"
+        "Then, for EVERY episode listed below, score how strongly each of those three "
+        "emotions is present in that episode's events, on a 0-100 scale. Scores are "
+        "INDEPENDENT of each other — an episode can run high or low on more than one "
+        "emotion at once; they do not need to sum to 100.\n\n"
+        "The curve should read like a real dramatic pulse driven by the actual plot: "
+        "rising tension toward mid-season turns, brief dips for relief or breathing "
+        "room, and a climax that lands near the finale. Ground every score in the "
+        "episode's actual summary, events, and cliffhanger — never a mechanical "
+        "straight-line increase.\n\n"
+        "Name the single dominant_emotion (it must exactly match one of your three "
+        "labels) and write a 2-3 sentence summary describing how the emotional arc "
+        "rises and falls across the season.\n\n"
+        f"GENRE: {blueprint.get('genre', '')}\n"
+        f"THEME: {blueprint.get('theme', '')}\n"
+        f"MAIN STORYLINE: {blueprint.get('main_storyline', '')}\n\n"
+        f"EPISODES (number. title — summary (emotional focus; cliffhanger)):\n{numbered}"
+        + _feedback_block(instruction)
+    )
+
+
+def character_portrait(character: dict[str, Any], blueprint: dict[str, Any]) -> str:
+    appearance = character.get("physical_persona") or character.get("description", "")
+    return (
+        "Generate a single character concept-art portrait for an audio drama's "
+        "promotional art. Upper-body / bust shot, three-quarter or front-facing "
+        "angle, cinematic lighting, painterly digital-illustration style — not "
+        "photorealistic, not anime, not a photograph. Plain, softly-lit "
+        "background that doesn't compete with the character. Exactly ONE "
+        "character in frame. No text, no logos, no watermarks, no speech "
+        "bubbles, no comic panels, no signature.\n\n"
+        f"CHARACTER: {character.get('name', '')} — "
+        f"{'Narrator' if character.get('is_narrator') else character.get('role', '')}\n"
+        f"GENDER / PRESENTATION: {character.get('gender') or 'Unspecified'}\n"
+        f"APPEARANCE: {appearance}\n"
+        f"PERSONALITY: {character.get('personality', '')}\n\n"
+        f"SERIES GENRE: {blueprint.get('genre', '')}\n"
+        f"SERIES TONE: {blueprint.get('tone', '')}\n"
+        f"SETTING / WORLD: {blueprint.get('setting') or blueprint.get('story_world', '')}\n\n"
+        "Match the art direction, palette, and mood to this genre and setting so "
+        "every character in the cast reads as belonging to the same show."
+    )
+
+
 def episode_evaluation(blueprint: dict[str, Any], outline: dict[str, Any],
                        script_lines: list[dict[str, Any]]) -> str:
     return (

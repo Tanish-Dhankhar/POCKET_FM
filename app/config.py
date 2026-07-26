@@ -56,6 +56,12 @@ CORS_ORIGINS = [
 # ---------------------------------------------------------------------------
 TEXT_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
+IMAGE_MODEL = "gemini-3.1-flash-image"
+
+# Character portraits: one bust-shot illustration per character, generated once
+# and cached to disk (see app/images.py + app/character_art.py).
+IMAGE_ASPECT_RATIO = "3:4"
+IMAGE_MAX_RETRIES = 4
 
 # Thinking levels per task type (Flash-Lite supports minimal/low/medium/high).
 THINK_HIGH = "high"    # creative + consistency-heavy (blueprint, plan, script)

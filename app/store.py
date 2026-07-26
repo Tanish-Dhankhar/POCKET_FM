@@ -233,6 +233,37 @@ def load_characters(series_id: str) -> list[dict]:
     return [c for c in (read_json(f) for f in files) if c]
 
 
+def load_character(series_id: str, key: str) -> dict[str, Any] | None:
+    """One character by its file-stem key (a slug, or 'narrator')."""
+    return read_json(characters_dir(series_id) / f"{key}.json", None)
+
+
+# --------------------------------------------------------------------------- #
+# character portraits (Gemini-generated concept art, one PNG per character)
+# --------------------------------------------------------------------------- #
+def character_portraits_dir(series_id: str) -> Path:
+    return characters_dir(series_id) / "portraits"
+
+
+def character_portrait_path(series_id: str, key: str) -> Path:
+    return character_portraits_dir(series_id) / f"{key}.png"
+
+
+def mark_character_portrait_stale(series_id: str, key: str) -> None:
+    character = load_character(series_id, key)
+    if character and character.get("portrait_generated_at"):
+        character["portrait_stale"] = True
+        save_character(series_id, character)
+
+
+def mark_all_character_portraits_stale(series_id: str) -> None:
+    """Genre/tone/setting changed — every cast member's art direction is affected."""
+    for character in load_characters(series_id):
+        if character.get("portrait_generated_at"):
+            character["portrait_stale"] = True
+            save_character(series_id, character)
+
+
 def load_blueprint(series_id: str) -> dict[str, Any]:
     d = blueprint_dir(series_id)
     plot = read_json(d / "plot.json", {}) or {}
@@ -252,6 +283,7 @@ def load_blueprint(series_id: str) -> dict[str, Any]:
         "swot": swot,
         "genre_data": genre,
         "theme_data": theme,
+        "emotional_curve": load_emotional_curve(series_id),
         "characters": load_characters(series_id),
     }
 
@@ -321,6 +353,80 @@ def save_story_analysis(series_id: str, analysis: dict[str, Any]) -> dict[str, A
     })
     write_json(theme_path, theme)
     return {"swot": swot, "genre": genre, "theme": theme}
+
+
+def _emotion_key(label: str, taken: set[str]) -> str:
+    """Chart-friendly dataKey for an emotion label ('Cold Betrayal' -> 'cold_betrayal')."""
+    key = slug(label).replace("-", "_") or "emotion"
+    base = key
+    n = 2
+    while key in taken:
+        key = f"{base}_{n}"
+        n += 1
+    taken.add(key)
+    return key
+
+
+def emotional_curve_path(series_id: str) -> Path:
+    return blueprint_dir(series_id) / "emotional_curve.json"
+
+
+def save_emotional_curve(series_id: str, analysis: dict[str, Any],
+                         episodes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Persist the top-3 emotion arc, one intensity score per emotion per episode."""
+    revision = int(load_index(series_id).get("revision", 1) or 1)
+    episodes = episodes if episodes is not None else load_outlines(series_id)
+    titles = {int(ep.get("number", 0)): ep.get("title", "") for ep in episodes}
+
+    labels = [
+        (analysis.get("emotion_1_label") or "Tension").strip() or "Tension",
+        (analysis.get("emotion_2_label") or "Hope").strip() or "Hope",
+        (analysis.get("emotion_3_label") or "Grief").strip() or "Grief",
+    ]
+    taken: set[str] = set()
+    keys = [_emotion_key(label, taken) for label in labels]
+
+    points = []
+    for row in analysis.get("points", []):
+        number = int(row.get("episode", 0) or 0)
+        if number <= 0:
+            continue
+        point = {"episode": number, "beat": f"E{number}", "title": titles.get(number, "")}
+        for key, field in zip(keys, ("emotion_1", "emotion_2", "emotion_3")):
+            point[key] = max(0, min(100, int(row.get(field, 0) or 0)))
+        points.append(point)
+    points.sort(key=lambda p: p["episode"])
+
+    dominant_raw = (analysis.get("dominant_emotion") or labels[0]).strip().lower()
+    dominant_key = keys[0]
+    for label, key in zip(labels, keys):
+        if label.strip().lower() == dominant_raw:
+            dominant_key = key
+            break
+
+    curve = {
+        "emotions": [{"key": key, "label": label} for key, label in zip(keys, labels)],
+        "points": points,
+        "dominant_emotion": dominant_key,
+        "summary": analysis.get("summary", ""),
+        "source_revision": revision,
+        "generated_at": _now(),
+        "stale": False,
+    }
+    write_json(emotional_curve_path(series_id), curve)
+    return curve
+
+
+def load_emotional_curve(series_id: str) -> dict[str, Any]:
+    return read_json(emotional_curve_path(series_id), {}) or {}
+
+
+def mark_emotional_curve_stale(series_id: str) -> None:
+    path = emotional_curve_path(series_id)
+    curve = read_json(path, {}) or {}
+    if curve:
+        curve["stale"] = True
+        write_json(path, curve)
 
 
 def save_voice_cast(series_id: str, voice_cast: dict[str, str]) -> None:
