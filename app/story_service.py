@@ -24,8 +24,8 @@ def _analysis_input(series_id: str) -> tuple[dict[str, Any], list[str], list[str
         "setting": bp.get("setting", ""),
         "characters": bp.get("characters", []),
     }
-    genre_tags = list(confirmed.get("genre_tags") or bp.get("genre_data", {}).get("tags") or [])[:4]
-    theme_raw = confirmed.get("theme_tags") or bp.get("theme_data", {}).get("tags") or []
+    genre_tags = list(confirmed.get("genre_tags") or bp.get("genre_tags") or [])[:4]
+    theme_raw = confirmed.get("theme_tags") or bp.get("theme_tags") or []
     theme_tags = [row.get("label", "") if isinstance(row, dict) else str(row) for row in theme_raw][:4]
     return blueprint, genre_tags, theme_tags
 
@@ -35,7 +35,7 @@ def generate_analysis(series_id: str, instruction: str = "") -> dict[str, Any]:
     result = generate_structured(
         prompts.story_analysis(blueprint, genre_tags, theme_tags, instruction),
         schemas.StoryAnalysis,
-        thinking=config.THINK_HIGH,
+        task="story_analysis",
         system=prompts.SYSTEM,
     )
     return store.save_story_analysis(series_id, result.model_dump())
@@ -102,6 +102,36 @@ def start_emotional_curve_job(series_id: str, instruction: str = "") -> dict[str
     )
 
 
+def generate_emotional_curve(series_id: str) -> dict[str, Any]:
+    episodes = store.load_outlines(series_id)
+    if not episodes:
+        raise ValueError("generate the episode plan before the emotional curve")
+    result = generate_structured(
+        prompts.emotional_curve(store.load_blueprint(series_id), episodes),
+        schemas.EmotionCurve,
+        task="emotional_curve",
+        system=prompts.SYSTEM,
+    )
+    return store.save_emotional_curve(series_id, result.model_dump(), episodes)
+
+
+def start_emotional_curve_job(series_id: str) -> dict[str, Any]:
+    if not store.load_outlines(series_id):
+        raise ValueError("generate the episode plan before the emotional curve")
+
+    def worker(handle: jobs.JobHandle) -> dict[str, Any]:
+        handle.step("emotional_curve", "Mapping emotion across the season")
+        result = generate_emotional_curve(series_id)
+        handle.progress(1, 1, "Emotional curve ready")
+        return {"series_id": series_id, "emotional_curve": result}
+
+    return jobs.start_or_rejoin(
+        "emotional_curve", worker,
+        dedupe_key=("emotional_curve", series_id),
+        series_id=series_id, steps=["emotional_curve"],
+    )
+
+
 def _script_hash(lines: list[dict[str, Any]]) -> str:
     payload = json.dumps(lines, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -116,7 +146,7 @@ def evaluate_episode(series_id: str, number: int) -> dict[str, Any]:
     result = generate_structured(
         prompts.episode_evaluation(state.get("blueprint", {}), episode.get("outline", {}), lines),
         schemas.EpisodeEvaluation,
-        thinking=config.THINK_LOW,
+        task="episode_evaluation",
         system=prompts.SYSTEM,
     ).model_dump()
     result.update({
@@ -147,7 +177,7 @@ def refine_series(series_id: str, instruction: str, handle: jobs.JobHandle) -> d
         prompts.blueprint(state.get("idea", ""), extracted,
                           state.get("clarification_answers", []), arcs, instruction),
         schemas.Blueprint,
-        thinking=config.THINK_HIGH,
+        task="blueprint",
         system=prompts.SYSTEM,
     ).model_dump()
     for character in bp.get("characters", []):
@@ -168,7 +198,7 @@ def refine_series(series_id: str, instruction: str, handle: jobs.JobHandle) -> d
     plan = generate_structured(
         prompts.episode_plan(bp, count, minutes, "", instruction),
         schemas.EpisodePlan,
-        thinking=config.THINK_HIGH,
+        task="episode_plan",
         system=prompts.SYSTEM,
     )
     episodes = [item.model_dump() for item in plan.episodes]

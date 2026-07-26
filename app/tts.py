@@ -14,6 +14,7 @@ import uuid
 import wave
 from pathlib import Path
 
+from google import genai
 from google.genai import types
 
 from . import config
@@ -26,19 +27,28 @@ _rate_lock = threading.Lock()
 _last_call_at = 0.0
 _tts_slots = threading.BoundedSemaphore(config.TTS_MAX_CONCURRENCY)
 _cache_locks = [threading.Lock() for _ in range(64)]
+_lanes_lock = threading.Lock()
+_lanes_signature: tuple[str, ...] = ()
+_lanes: list[dict] = []
+_next_lane = 0
 
 
-def _throttle() -> None:
+def _throttle(lane: dict | None = None) -> None:
     """Block until at least TTS_MIN_INTERVAL_SEC has passed since the last call."""
     global _last_call_at
     if config.TTS_MIN_INTERVAL_SEC <= 0:
         return
-    with _rate_lock:
+    lock = lane["lock"] if lane is not None else _rate_lock
+    with lock:
         now = time.monotonic()
-        wait = max(0.0, _last_call_at + config.TTS_MIN_INTERVAL_SEC - now)
+        previous = lane["last_call_at"] if lane is not None else _last_call_at
+        wait = max(0.0, previous + config.TTS_MIN_INTERVAL_SEC - now)
         # Reserve the next slot before sleeping so concurrent callers cannot
         # all wake and burst through the provider quota together.
-        _last_call_at = now + wait
+        if lane is not None:
+            lane["last_call_at"] = now + wait
+        else:
+            _last_call_at = now + wait
     if wait > 0:
         time.sleep(wait)
 
@@ -50,6 +60,78 @@ def _is_retryable(err: Exception) -> bool:
         "429", "resource_exhausted", "rate limit",
         "503", "unavailable", "500", "internal", "overloaded", "high demand",
     ))
+
+
+def _is_invalid_key(err: Exception) -> bool:
+    text = str(err).lower()
+    return any(marker in text for marker in (
+        "api_key_invalid", "invalid api key", "401", "unauthenticated",
+    ))
+
+
+def _configured_lanes() -> list[dict]:
+    """Return per-key clients, rebuilding when configuration changes in tests."""
+    global _lanes_signature, _lanes, _next_lane
+    signature = tuple(config.GEMINI_API_KEYS)
+    with _lanes_lock:
+        if signature != _lanes_signature:
+            _lanes_signature = signature
+            _next_lane = 0
+            _lanes = []
+            if len(signature) > 1:
+                _lanes = [
+                    {
+                        "key": key,
+                        "client": genai.Client(api_key=key),
+                        "disabled": False,
+                        "last_call_at": 0.0,
+                        "lock": threading.Lock(),
+                    }
+                    for key in signature
+                ]
+        return _lanes
+
+
+def _next_available_lane() -> dict | None:
+    global _next_lane
+    lanes = _configured_lanes()
+    if not lanes:
+        return None
+    with _lanes_lock:
+        for _ in range(len(lanes)):
+            lane = lanes[_next_lane % len(lanes)]
+            _next_lane = (_next_lane + 1) % len(lanes)
+            if not lane["disabled"]:
+                return lane
+    return None
+
+
+def _generate(cfg, text: str):
+    """Call one healthy key lane; invalid keys are disabled for this process."""
+    lanes = _configured_lanes()
+    if not lanes:
+        _throttle()
+        return client().models.generate_content(
+            model=config.TTS_MODEL, contents=text, config=cfg,
+        )
+
+    last_invalid: Exception | None = None
+    for _ in range(len(lanes)):
+        lane = _next_available_lane()
+        if lane is None:
+            break
+        _throttle(lane)
+        try:
+            return lane["client"].models.generate_content(
+                model=config.TTS_MODEL, contents=text, config=cfg,
+            )
+        except Exception as err:  # provider SDK exposes several auth exceptions
+            if not _is_invalid_key(err):
+                raise
+            lane["disabled"] = True
+            last_invalid = err
+    raise RuntimeError(f"all configured Gemini API keys are invalid: {last_invalid}") \
+        from last_invalid
 
 
 def _synthesize(text: str, voice_id: str) -> bytes:
@@ -64,13 +146,19 @@ def _synthesize(text: str, voice_id: str) -> bytes:
     )
     last: Exception | None = None
     for attempt in range(config.TTS_MAX_RETRIES):
-        _throttle()
         try:
             with _tts_slots:
-                resp = client().models.generate_content(
-                    model=config.TTS_MODEL, contents=text, config=cfg,
-                )
-                return resp.candidates[0].content.parts[0].inline_data.data
+                resp = _generate(cfg, text)
+                try:
+                    data = resp.candidates[0].content.parts[0].inline_data.data
+                except (AttributeError, IndexError, TypeError):
+                    data = None
+                if not data:
+                    # The preview endpoint can occasionally return a candidate with
+                    # no audio part under load. Treat it like a transient unavailable
+                    # response so the next retry can use another configured key lane.
+                    raise RuntimeError("TTS model unavailable: response contained no audio data")
+                return data
         except Exception as err:  # noqa: BLE001 — re-raised below if not transient
             if not _is_retryable(err):
                 raise

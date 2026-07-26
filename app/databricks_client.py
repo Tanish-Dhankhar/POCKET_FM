@@ -12,9 +12,11 @@ run work on a background executor instead.
 from __future__ import annotations
 
 import logging
+import importlib.util
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,6 +27,7 @@ _LOG = logging.getLogger(__name__)
 _CERTIFI_PATCHED = False
 _CERTIFI_LOCK = threading.Lock()
 _WARNED_MISCONFIGURED = False
+_WARNED_MISSING_SDK = False
 
 # Small, bounded pool for fire-and-forget dual-write calls. Sized independently
 # of JOB_MAX_CONCURRENCY so a slow/cold SQL warehouse can never block episode
@@ -54,6 +57,20 @@ def _patch_certifi() -> None:
         _CERTIFI_PATCHED = True
 
 
+@lru_cache(maxsize=1)
+def _connector_installed() -> bool:
+    """Whether the optional Databricks packages are importable.
+
+    Uses find_spec so a disabled/uninstalled setup never pays the import cost,
+    and caches the answer since it can't change while the process is running.
+    """
+    try:
+        return all(importlib.util.find_spec(name) is not None
+                   for name in ("databricks.sql", "databricks.sdk"))
+    except (ImportError, ValueError):
+        return False
+
+
 def is_enabled() -> bool:
     """True only when the feature flag is on AND required credentials are set.
 
@@ -79,6 +96,19 @@ def is_enabled() -> bool:
                 ", ".join(missing),
             )
             _WARNED_MISCONFIGURED = True
+        return False
+
+    # The connector is an optional dependency. Without it every dual-write
+    # would raise ModuleNotFoundError on the executor and log a full traceback
+    # per save, so treat "not installed" the same as "not configured".
+    if not _connector_installed():
+        if not _WARNED_MISSING_SDK:
+            _LOG.warning(
+                "DATABRICKS_ENABLED=true but the databricks connector is not "
+                "installed — Databricks dual-write is disabled. Install it with: "
+                "pip install databricks-sql-connector databricks-sdk"
+            )
+            globals()["_WARNED_MISSING_SDK"] = True
         return False
 
     _patch_certifi()

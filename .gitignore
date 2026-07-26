@@ -13,3 +13,8 @@ frontend/dist/
 ./node_modules
 .pytest_cache/
 .tmp_ray_ppt/
+.agents/
+frontend_reference/
+pocketphotos/
+videos/
+

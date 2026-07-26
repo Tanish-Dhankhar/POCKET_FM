@@ -17,7 +17,14 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+_gemini_keys_raw = (
+    os.environ.get("GEMINI_API_KEYS", "")
+    or os.environ.get("GEMINI_API_KEY", "")
+)
+GEMINI_API_KEYS = [
+    key.strip() for key in _gemini_keys_raw.split(",") if key.strip()
+]
+GEMINI_API_KEY = GEMINI_API_KEYS[0] if GEMINI_API_KEYS else ""
 # Prefer the standard SDK variable. The fallback keeps existing local .env files
 # that used the old hyphenated spelling working during the migration.
 OPENAI_API_KEY = (
@@ -62,10 +69,29 @@ TEXT_MODEL = os.environ.get("GEMINI_TEXT_MODEL", "gemini-3.1-flash-lite")
 TRANSCRIPTION_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
-# Reasoning levels also select the OpenAI model tier in app.llm:
-# high -> Sol for creative/consistency-heavy work; low -> Luna for mechanical work.
-THINK_HIGH = "high"    # creative + consistency-heavy (blueprint, plan, script)
-THINK_LOW = "low"      # mechanical (sound-cue tagging, evaluation, casting)
+# Reasoning and model selection are deliberately separate.  Every production
+# text call names one route below, making its Luna/Sol assignment auditable.
+THINK_HIGH = "high"
+THINK_MEDIUM = "medium"
+THINK_LOW = "low"
+
+# Keep latency-sensitive, bounded structured work on Luna.  Sol is reserved for
+# the three places where long-range creative consistency materially matters.
+# max_output_tokens is a guardrail against runaway generations, not a target.
+TEXT_TASKS: dict[str, dict[str, str | int]] = {
+    "wizard_bootstrap": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 3000},
+    "clarify_regeneration": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 2400},
+    "confirm_card": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 1200},
+    "blueprint": {"model": TEXT_MODEL_HARD, "tier": "sol", "effort": THINK_MEDIUM, "max_output_tokens": 8000},
+    "episode_config": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 700},
+    "episode_plan": {"model": TEXT_MODEL_HARD, "tier": "sol", "effort": THINK_MEDIUM, "max_output_tokens": 7000},
+    "emotional_curve": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 3200},
+    "episode_script": {"model": TEXT_MODEL_HARD, "tier": "sol", "effort": THINK_MEDIUM, "max_output_tokens": 16000},
+    "voice_cast": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 2400},
+    "sound_design": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 8000},
+    "story_analysis": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 3200},
+    "episode_evaluation": {"model": TEXT_MODEL_EASY, "tier": "luna", "effort": THINK_LOW, "max_output_tokens": 2600},
+}
 
 # ---------------------------------------------------------------------------
 # Images (OpenAI) — series thumbnail + character portraits
@@ -76,7 +102,7 @@ THINK_LOW = "low"      # mechanical (sound-cue tagging, evaluation, casting)
 IMAGE_ENABLED = os.environ.get("IMAGE_ENABLED", "false").strip().lower() in (
     "1", "true", "yes",
 )
-IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
+IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2")
 # Portrait key art. Cropped by the landscape dashboard card, but reusable if a
 # portrait cover view is added later.
 IMAGE_SIZE = os.environ.get("IMAGE_SIZE", "1024x1536")
@@ -98,6 +124,20 @@ SFX_DIR = ASSETS_DIR / "sfx"
 SOUND_MANIFEST = ASSETS_DIR / "sound_manifest.json"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
+# Shared content-addressed cache for text responses, transcription, and images.
+# Exact requests return locally without contacting a provider. Bump VERSION to
+# invalidate all entries after a semantic request-format change.
+MODEL_CACHE_ENABLED = os.environ.get("MODEL_CACHE_ENABLED", "true").strip().lower() in (
+    "1", "true", "yes",
+)
+MODEL_CACHE_DIR = Path(
+    os.environ.get("MODEL_CACHE_DIR", str(OUTPUT_DIR / "_model_cache"))
+)
+MODEL_CACHE_TTL_SEC = max(
+    0, int(os.environ.get("MODEL_CACHE_TTL_SEC", str(7 * 24 * 60 * 60)))
+)
+MODEL_CACHE_VERSION = os.environ.get("MODEL_CACHE_VERSION", "v1").strip() or "v1"
+
 # ---------------------------------------------------------------------------
 # Audio
 # ---------------------------------------------------------------------------
@@ -110,11 +150,18 @@ TTS_SAMPLE_WIDTH = 2           # bytes (16-bit)
 TTS_MIN_INTERVAL_SEC = float(os.environ.get("TTS_MIN_INTERVAL_SEC", "21"))
 TTS_MAX_RETRIES = 6
 TTS_MAX_CONCURRENCY = max(1, int(os.environ.get("TTS_MAX_CONCURRENCY", "1")))
+TTS_PARALLEL_WORKERS = max(
+    1, int(os.environ.get("TTS_PARALLEL_WORKERS", str(TTS_MAX_CONCURRENCY)))
+)
 TTS_CACHE_DIR = Path(os.environ.get("TTS_CACHE_DIR", str(OUTPUT_DIR / "tts_cache")))
 
 # Provider protection. The API routes remain synchronous, but these limits keep
 # a burst of creator requests from exhausting every request thread or provider slot.
 MODEL_TIMEOUT_MS = max(1_000, int(os.environ.get("MODEL_TIMEOUT_MS", "120000")))
+# Reasoning models on a long prompt (the blueprint and per-episode scripts are
+# the worst cases) routinely run past the generic 120s budget, so text
+# generation gets its own, longer one.
+TEXT_TIMEOUT_MS = max(1_000, int(os.environ.get("TEXT_TIMEOUT_MS", "600000")))
 MODEL_MAX_RETRIES = max(1, int(os.environ.get("MODEL_MAX_RETRIES", "3")))
 MODEL_MAX_CONCURRENCY = max(1, int(os.environ.get("MODEL_MAX_CONCURRENCY", "8")))
 

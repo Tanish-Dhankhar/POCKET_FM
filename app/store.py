@@ -177,6 +177,18 @@ def save_clarification_answers(series_id: str, answers: list[dict]) -> None:
     write_json(input_dir(series_id) / "clarification_answers.json", answers)
 
 
+def save_confirmation_draft(series_id: str, card: dict) -> None:
+    write_json(input_dir(series_id) / "confirmation_draft.json", card)
+
+
+def load_confirmation_draft(series_id: str) -> dict[str, Any]:
+    return read_json(input_dir(series_id) / "confirmation_draft.json", {}) or {}
+
+
+def save_confirmations(series_id: str, values: dict[str, Any]) -> None:
+    write_json(input_dir(series_id) / "confirmations.json", values)
+
+
 def load_input(series_id: str) -> dict[str, Any]:
     d = input_dir(series_id)
     return {
@@ -184,6 +196,8 @@ def load_input(series_id: str) -> dict[str, Any]:
         "transcript": read_text(d / "transcript.txt"),
         "clarification": read_json(d / "clarification.json", {}) or {},
         "clarification_answers": read_json(d / "clarification_answers.json", []) or [],
+        "confirmation_draft": load_confirmation_draft(series_id),
+        "confirmations": read_json(d / "confirmations.json", {}) or {},
     }
 
 
@@ -199,16 +213,19 @@ def save_blueprint(series_id: str, blueprint: dict, *, meta: dict | None = None)
         "logline": bp.get("logline", meta.get("logline", "")),
         "story_world": bp.get("story_world", ""),
         "main_storyline": bp.get("main_storyline", ""),
+        "story_beats": bp.get("story_beats", []),
     })
     write_json(blueprint_dir(series_id) / "theme.json", {
         "theme": bp.get("theme", meta.get("theme", "")),
         "tone": bp.get("tone", meta.get("tone", "")),
+        "tags": bp.get("theme_tags", meta.get("theme_tags", [])),
     })
     write_json(blueprint_dir(series_id) / "genre.json", {
-        "genre": meta.get("genre", ""),
-        "setting": meta.get("setting", ""),
-        "language": meta.get("language", config.DEFAULT_LANGUAGE),
+        "genre": bp.get("genre", meta.get("genre", "")),
+        "setting": bp.get("setting", meta.get("setting", "")),
+        "language": bp.get("language", meta.get("language", config.DEFAULT_LANGUAGE)),
         "tone": bp.get("tone", meta.get("tone", "")),
+        "tags": bp.get("genre_tags", meta.get("genre_tags", [])),
     })
 
     for ch in bp.get("characters", []) or []:
@@ -249,13 +266,17 @@ def load_blueprint(series_id: str) -> dict[str, Any]:
         "logline": plot.get("logline", ""),
         "story_world": plot.get("story_world", ""),
         "main_storyline": plot.get("main_storyline", ""),
+        "story_beats": plot.get("story_beats", []),
         "theme": theme.get("theme", ""),
+        "theme_tags": theme.get("tags", theme.get("confirmed_tags", [])),
         "tone": theme.get("tone", genre.get("tone", "")),
         "genre": genre.get("genre", ""),
+        "genre_tags": genre.get("tags", []),
         "setting": genre.get("setting", ""),
         "language": genre.get("language", ""),
         "emotional_curve": load_emotional_curve(series_id),
         "characters": load_characters(series_id),
+        "emotional_curve": load_emotional_curve(series_id),
     }
 
 
@@ -359,6 +380,7 @@ def save_episode_outline(series_id: str, outline: dict) -> Path:
     num = int(outline.get("number", 0))
     path = write_json(episode_dir(series_id, num) / "outline.json", outline)
     databricks_store.sync_episode_outline(series_id, num, outline)
+    mark_emotional_curve_stale(series_id)
     return path
 
 
@@ -380,6 +402,10 @@ def save_episode_audio(series_id: str, number: int, manifest: dict) -> Path:
     return path
 
 
+def save_episode_evaluation(series_id: str, number: int, evaluation: dict) -> Path:
+    return write_json(episode_dir(series_id, number) / "evaluation.json", evaluation)
+
+
 def load_episode(series_id: str, number: int) -> dict[str, Any]:
     d = episode_dir(series_id, number)
     return {
@@ -388,6 +414,7 @@ def load_episode(series_id: str, number: int) -> dict[str, Any]:
         "script": read_json(d / "script.json", []) or [],
         "sound_plan": read_json(d / "sound_plan.json", {}) or {},
         "audio": read_json(d / "audio.json", {}) or {},
+        "evaluation": read_json(d / "evaluation.json", {}) or {},
     }
 
 
@@ -514,10 +541,14 @@ def hydrate(series_id: str) -> dict[str, Any]:
         "characters": bp["characters"],
         "clarification": inp["clarification"],
         "clarification_answers": inp["clarification_answers"],
+        "confirmation_draft": inp["confirmation_draft"],
         "blueprint": {
             "logline": bp["logline"], "story_world": bp["story_world"],
-            "main_storyline": bp["main_storyline"], "tone": bp["tone"],
-            "theme": bp["theme"], "characters": bp["characters"],
+            "main_storyline": bp["main_storyline"], "story_beats": bp["story_beats"],
+            "genre": bp["genre"], "genre_tags": bp["genre_tags"],
+            "tone": bp["tone"], "theme": bp["theme"],
+            "theme_tags": bp["theme_tags"], "setting": bp["setting"],
+            "language": bp["language"], "characters": bp["characters"],
         },
         "episodes": load_outlines(series_id),
         "scripts": load_scripts(series_id),

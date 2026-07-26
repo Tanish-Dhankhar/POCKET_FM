@@ -216,6 +216,12 @@ def health() -> dict:
             "hard": config.TEXT_MODEL_HARD,
             "easy": config.TEXT_MODEL_EASY,
         },
+        "text_call_routes": config.TEXT_TASKS,
+        "model_cache": {
+            "enabled": config.MODEL_CACHE_ENABLED,
+            "ttl_seconds": config.MODEL_CACHE_TTL_SEC,
+            "version": config.MODEL_CACHE_VERSION,
+        },
         "transcription_model": config.TRANSCRIPTION_MODEL,
         "tts_model": config.TTS_MODEL,
         "jobs": jobs.summary(),
