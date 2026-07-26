@@ -6,7 +6,6 @@ caps, voice catalogue) lives here so the rest of the code stays declarative.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -19,31 +18,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
-
-def _gemini_api_keys() -> list[str]:
-    """Read all configured Gemini keys and de-duplicate them."""
-    candidates = [GEMINI_API_KEY]
-    candidates.extend(re.split(r"[,;\s]+", os.environ.get("GEMINI_API_KEYS", "")))
-    numbered = sorted(
-        (name, value) for name, value in os.environ.items()
-        if name.startswith("GEMINI_API_KEY_")
-        and name[len("GEMINI_API_KEY_"):].isdigit()
-    )
-    candidates.extend(value for _, value in numbered)
-    keys: list[str] = []
-    for value in candidates:
-        value = value.strip().strip('"').strip("'")
-        if value and value not in keys:
-            keys.append(value)
-    return keys
-
-
-GEMINI_API_KEYS = _gemini_api_keys()
-# Keep the legacy single-key setting usable when only the pooled variable is set.
-# Text generation uses this value while TTS can rotate across the full pool.
-if not GEMINI_API_KEY and GEMINI_API_KEYS:
-    GEMINI_API_KEY = GEMINI_API_KEYS[0]
+# Prefer the standard SDK variable. The fallback keeps existing local .env files
+# that used the old hyphenated spelling working during the migration.
+OPENAI_API_KEY = (
+    os.environ.get("OPENAI_API_KEY", "")
+    or os.environ.get("OPEN-AI-API-KEY", "")
+).strip()
 
 # Origins allowed to call the API from a browser. Comma-separated override via
 # CORS_ORIGINS; "*" allows any origin (fine for local dev / a hackathon demo).
@@ -52,9 +32,30 @@ CORS_ORIGINS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Databricks (optional dual-write mirror — see app/databricks_store.py)
+# ---------------------------------------------------------------------------
+# Off by default. Local disk (app/store.py) is always the source of truth;
+# turning this on only adds a best-effort mirrored copy in Delta + a Unity
+# Catalog Volume. Leaving it off (or misconfigured) is 100% safe — nothing
+# here is imported or contacted unless every required var is also set.
+DATABRICKS_ENABLED = os.environ.get("DATABRICKS_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes",
+)
+DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST", "")
+DATABRICKS_CLIENT_ID = os.environ.get("DATABRICKS_CLIENT_ID", "")
+DATABRICKS_CLIENT_SECRET = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+DATABRICKS_SERVER_HOSTNAME = os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")
+DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH", "")
+DATABRICKS_CATALOG = os.environ.get("DATABRICKS_CATALOG", "pocketfm_dev")
+DATABRICKS_SCHEMA = os.environ.get("DATABRICKS_SCHEMA", "studio")
+DATABRICKS_VOLUME = os.environ.get("DATABRICKS_VOLUME", "audio")
+
+# ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-TEXT_MODEL = "gemini-3.1-flash-lite"
+TEXT_MODEL_HARD = os.environ.get("OPENAI_HARD_MODEL", "gpt-5.6-sol")
+TEXT_MODEL_EASY = os.environ.get("OPENAI_EASY_MODEL", "gpt-5.6-luna")
+TRANSCRIPTION_MODEL = "gemini-3.1-flash-lite"
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 IMAGE_MODEL = "gemini-3.1-flash-image"
 
@@ -63,9 +64,32 @@ IMAGE_MODEL = "gemini-3.1-flash-image"
 IMAGE_ASPECT_RATIO = "3:4"
 IMAGE_MAX_RETRIES = 4
 
-# Thinking levels per task type (Flash-Lite supports minimal/low/medium/high).
+# Reasoning levels also select the OpenAI model tier in app.llm:
+# high -> Sol for creative/consistency-heavy work; low -> Luna for mechanical work.
 THINK_HIGH = "high"    # creative + consistency-heavy (blueprint, plan, script)
-THINK_LOW = "low"      # mechanical (sound-cue tagging, extraction)
+THINK_LOW = "low"      # mechanical (sound-cue tagging, evaluation, casting)
+
+# ---------------------------------------------------------------------------
+# Images (OpenAI) — series thumbnail + character portraits
+# ---------------------------------------------------------------------------
+# Off by default. Artwork is decoration: with this false, app/images.py never
+# contacts a provider and every generator returns None, so the story pipeline is
+# completely unaffected. Flip IMAGE_ENABLED=true in .env to turn it on.
+IMAGE_ENABLED = os.environ.get("IMAGE_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes",
+)
+IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
+# Portrait key art. Cropped by the landscape dashboard card, but reusable if a
+# portrait cover view is added later.
+IMAGE_SIZE = os.environ.get("IMAGE_SIZE", "1024x1536")
+IMAGE_QUALITY = os.environ.get("IMAGE_QUALITY", "medium")   # low | medium | high
+
+# At most this many character portraits per series, narrator excluded.
+MAX_CHARACTER_IMAGES = max(1, int(os.environ.get("MAX_CHARACTER_IMAGES", "3")))
+
+IMAGE_TIMEOUT_MS = max(1_000, int(os.environ.get("IMAGE_TIMEOUT_MS", "180000")))
+IMAGE_MAX_RETRIES = max(1, int(os.environ.get("IMAGE_MAX_RETRIES", "3")))
+IMAGE_MAX_CONCURRENCY = max(1, int(os.environ.get("IMAGE_MAX_CONCURRENCY", "2")))
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -87,11 +111,28 @@ TTS_SAMPLE_WIDTH = 2           # bytes (16-bit)
 # space calls out and retry on 429. Set TTS_MIN_INTERVAL_SEC=0 on a paid tier.
 TTS_MIN_INTERVAL_SEC = float(os.environ.get("TTS_MIN_INTERVAL_SEC", "21"))
 TTS_MAX_RETRIES = 6
-TTS_PARALLEL_WORKERS = max(1, min(
-    int(os.environ.get("TTS_PARALLEL_WORKERS", str(len(GEMINI_API_KEYS) or 1))),
-    len(GEMINI_API_KEYS) or 1,
-    16,
-))
+TTS_MAX_CONCURRENCY = max(1, int(os.environ.get("TTS_MAX_CONCURRENCY", "1")))
+TTS_CACHE_DIR = Path(os.environ.get("TTS_CACHE_DIR", str(OUTPUT_DIR / "tts_cache")))
+
+# Provider protection. The API routes remain synchronous, but these limits keep
+# a burst of creator requests from exhausting every request thread or provider slot.
+MODEL_TIMEOUT_MS = max(1_000, int(os.environ.get("MODEL_TIMEOUT_MS", "120000")))
+MODEL_MAX_RETRIES = max(1, int(os.environ.get("MODEL_MAX_RETRIES", "3")))
+MODEL_MAX_CONCURRENCY = max(1, int(os.environ.get("MODEL_MAX_CONCURRENCY", "8")))
+
+# In-process job controls. These deliberately do not imply multi-instance
+# durability; PostgreSQL/queue-backed work remains a later migration.
+JOB_MAX_CONCURRENCY = max(1, int(os.environ.get("JOB_MAX_CONCURRENCY", "2")))
+JOB_MAX_QUEUE = max(1, int(os.environ.get("JOB_MAX_QUEUE", "100")))
+JOB_MAX_RETAINED = max(1, int(os.environ.get("JOB_MAX_RETAINED", "200")))
+
+# Input guardrails cap memory and provider work without affecting normal ideas,
+# recordings, or scripts.
+MAX_IDEA_CHARS = max(1_000, int(os.environ.get("MAX_IDEA_CHARS", "50000")))
+MAX_UPLOAD_BYTES = max(1_024 * 1_024, int(os.environ.get("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))))
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_SCRIPT_LINES = max(1, int(os.environ.get("MAX_SCRIPT_LINES", "1000")))
+MAX_SCRIPT_LINE_CHARS = max(100, int(os.environ.get("MAX_SCRIPT_LINE_CHARS", "4000")))
 
 PAUSE_BETWEEN_LINES_MS = 350   # natural gap when stitching dialogue lines
 MUSIC_DUCK_DB = -16            # bed level under speech

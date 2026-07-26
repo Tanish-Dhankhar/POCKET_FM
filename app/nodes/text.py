@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import prompts, schemas, store
+from .. import image_service, prompts, schemas, store
 from ..llm import generate_structured
 from ..config import THINK_HIGH, THINK_LOW, CLARIFY_QUESTION_COUNT
 from ..state import SeriesState
@@ -139,7 +139,12 @@ def gen_blueprint(state: SeriesState) -> dict[str, Any]:
     store.save_clarification_answers(sid, state.get("clarification_answers", []))
     store.save_blueprint(sid, bp.model_dump(), meta=_extracted(state))
     store.save_index(sid, stage="blueprint", arcs=state.get("arcs", []))
+    # plot.json and the character files (with their physical descriptions) now
+    # exist, which is everything the artwork needs. Runs in the background — the
+    # graph never waits on it, and it no-ops when images are disabled.
+    image_service.start_images_job(sid)
     return {
+
         "blueprint": bp.model_dump(),
         # blueprint is now the authoritative character source
         "characters": characters,

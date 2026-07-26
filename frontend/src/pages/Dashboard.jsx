@@ -91,6 +91,15 @@ export default function Dashboard() {
             >
               {/* Full-bleed gradient — zooms on hover */}
               <div className={`absolute inset-0 bg-gradient-to-br ${CARD_ACCENTS[index % 4]} transition-transform duration-500 group-hover:scale-105`} />
+              {/* Generated cover art, when it exists — the gradient stays as the fallback */}
+              {item.has_thumbnail && (
+                <img
+                  src={studio.thumbnailUrl(item.series_id)}
+                  alt=""
+                  loading="lazy"
+                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+              )}
               {/* Readability overlay */}
               <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/40 to-transparent" />
 

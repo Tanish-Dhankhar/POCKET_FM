@@ -17,6 +17,9 @@ Layout (everything the frontend reads/writes lives here):
     │   └── characters/
     │       ├── narrator.json        # only when a narrator is used
     │       └── <character-slug>.json
+    ├── images/                      # optional artwork (see app/image_service.py)
+    │   ├── thumbnail.png
+    │   └── characters/<character-slug>.png
     └── episodes/
         └── ep01/
             ├── outline.json         # title, summary, events, emotion, cliffhanger
@@ -45,9 +48,14 @@ from pathlib import Path
 from typing import Any
 
 from . import config
+from . import databricks_store
 
 _SLUG = re.compile(r"[^a-z0-9]+")
-_EMOTION = re.compile(r"^\[([^\]]+)\]\s*")
+
+# Fields the loaders derive from the filesystem and attach for the UI. They are
+# stripped again on write so they never end up inside a stored record.
+_COMPUTED_CHARACTER_FIELDS = {"has_image"}
+
 
 
 # --------------------------------------------------------------------------- #
@@ -86,13 +94,34 @@ def lines_dir(series_id: str, number: int) -> Path:
     return episode_dir(series_id, number) / "lines"
 
 
+def images_dir(series_id: str) -> Path:
+    return series_dir(series_id) / "images"
+
+
+def character_images_dir(series_id: str) -> Path:
+    return images_dir(series_id) / "characters"
+
+
+def thumbnail_path(series_id: str) -> Path:
+    return images_dir(series_id) / "thumbnail.png"
+
+
+def character_image_path(series_id: str, key: str) -> Path:
+    return character_images_dir(series_id) / f"{key}.png"
+
+
+def character_key(character: dict) -> str:
+    """The file stem a character is stored under ('narrator', or its slug)."""
+    return "narrator" if character.get("is_narrator") else slug(character.get("name", ""))
+
+
 # --------------------------------------------------------------------------- #
 # primitive read / write
 # --------------------------------------------------------------------------- #
 def write_json(path: Path, data: Any) -> Path:
     """Atomically write JSON (temp file + replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str),
                    encoding="utf-8")
     tmp.replace(path)
@@ -110,7 +139,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 def write_text(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(text or "", encoding="utf-8")
     tmp.replace(path)
     return path
@@ -148,19 +177,6 @@ def save_clarification_answers(series_id: str, answers: list[dict]) -> None:
     write_json(input_dir(series_id) / "clarification_answers.json", answers)
 
 
-def save_confirmations(series_id: str, values: dict[str, Any]) -> None:
-    write_json(input_dir(series_id) / "confirmations.json", values)
-
-
-def append_refinement(series_id: str, instruction: str, **fields: Any) -> dict[str, Any]:
-    path = input_dir(series_id) / "refinements.json"
-    rows = read_json(path, []) or []
-    row = {"instruction": instruction, "created_at": _now(), **fields}
-    rows.append(row)
-    write_json(path, rows)
-    return row
-
-
 def load_input(series_id: str) -> dict[str, Any]:
     d = input_dir(series_id)
     return {
@@ -168,8 +184,6 @@ def load_input(series_id: str) -> dict[str, Any]:
         "transcript": read_text(d / "transcript.txt"),
         "clarification": read_json(d / "clarification.json", {}) or {},
         "clarification_answers": read_json(d / "clarification_answers.json", []) or [],
-        "confirmations": read_json(d / "confirmations.json", {}) or {},
-        "refinements": read_json(d / "refinements.json", []) or [],
     }
 
 
@@ -181,24 +195,16 @@ def save_blueprint(series_id: str, blueprint: dict, *, meta: dict | None = None)
     meta = meta or {}
     bp = blueprint or {}
 
-    plot_path = blueprint_dir(series_id) / "plot.json"
-    theme_path = blueprint_dir(series_id) / "theme.json"
-    genre_path = blueprint_dir(series_id) / "genre.json"
-    old_plot = read_json(plot_path, {}) or {}
-    old_theme = read_json(theme_path, {}) or {}
-    old_genre = read_json(genre_path, {}) or {}
-
-    write_json(plot_path, {**old_plot,
+    write_json(blueprint_dir(series_id) / "plot.json", {
         "logline": bp.get("logline", meta.get("logline", "")),
         "story_world": bp.get("story_world", ""),
         "main_storyline": bp.get("main_storyline", ""),
-        "story_beats": bp.get("story_beats", old_plot.get("story_beats", [])),
     })
-    write_json(theme_path, {**old_theme,
+    write_json(blueprint_dir(series_id) / "theme.json", {
         "theme": bp.get("theme", meta.get("theme", "")),
         "tone": bp.get("tone", meta.get("tone", "")),
     })
-    write_json(genre_path, {**old_genre,
+    write_json(blueprint_dir(series_id) / "genre.json", {
         "genre": meta.get("genre", ""),
         "setting": meta.get("setting", ""),
         "language": meta.get("language", config.DEFAULT_LANGUAGE),
@@ -211,17 +217,13 @@ def save_blueprint(series_id: str, blueprint: dict, *, meta: dict | None = None)
 
 def save_character(series_id: str, character: dict) -> Path:
     """One JSON per character; the narrator is always narrator.json."""
-    character = dict(character)
-    name = character.get("name", "")
-    character.setdefault("id", slug(name) or uuid.uuid4().hex[:12])
-    character.setdefault("details", character.get("description", ""))
-    character.setdefault("description", character.get("details", ""))
-    character.setdefault("physical_persona", "")
-    character.setdefault("backstory", "")
-    character.setdefault("vocal_direction", character.get("vocal_signature", ""))
-    character.setdefault("vocal_signature", character.get("vocal_direction", ""))
-    key = "narrator" if character.get("is_narrator") else slug(name)
-    return write_json(characters_dir(series_id) / f"{key}.json", character)
+    key = character_key(character)
+    # `has_image` is derived at read time; drop it so a load -> save round trip
+    # (e.g. save_voice_cast) can't bake a stale flag into the file.
+    record = {k: v for k, v in character.items() if k not in _COMPUTED_CHARACTER_FIELDS}
+    path = write_json(characters_dir(series_id) / f"{key}.json", record)
+    databricks_store.sync_character(series_id, key, record)
+    return path
 
 
 def load_characters(series_id: str) -> list[dict]:
@@ -230,7 +232,12 @@ def load_characters(series_id: str) -> list[dict]:
         return []
     # narrator first, then alphabetical — stable order for the UI
     files = sorted(d.glob("*.json"), key=lambda p: (p.stem != "narrator", p.stem))
-    return [c for c in (read_json(f) for f in files) if c]
+    characters = [c for c in (read_json(f) for f in files) if c]
+    for ch in characters:
+        # Computed at read time, never persisted — the file on disk is the truth.
+        ch["has_image"] = character_image_path(series_id, character_key(ch)).exists()
+    return characters
+
 
 
 def load_character(series_id: str, key: str) -> dict[str, Any] | None:
@@ -269,7 +276,6 @@ def load_blueprint(series_id: str) -> dict[str, Any]:
     plot = read_json(d / "plot.json", {}) or {}
     theme = read_json(d / "theme.json", {}) or {}
     genre = read_json(d / "genre.json", {}) or {}
-    swot = read_json(d / "swot.json", {}) or {}
     return {
         "logline": plot.get("logline", ""),
         "story_world": plot.get("story_world", ""),
@@ -450,34 +456,27 @@ def load_voice_cast(series_id: str) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 def save_episode_outline(series_id: str, outline: dict) -> Path:
     num = int(outline.get("number", 0))
-    return write_json(episode_dir(series_id, num) / "outline.json", outline)
+    path = write_json(episode_dir(series_id, num) / "outline.json", outline)
+    databricks_store.sync_episode_outline(series_id, num, outline)
+    return path
 
 
 def save_episode_script(series_id: str, number: int, lines: list[dict]) -> Path:
-    normalised = []
-    for i, raw in enumerate(lines):
-        line = dict(raw)
-        text = str(line.get("text", ""))
-        match = _EMOTION.match(text)
-        if match and not line.get("emotion") and match.group(1).lower() != "pause":
-            line["emotion"] = match.group(1)
-            line["text"] = text[match.end():]
-        line.setdefault("emotion", None)
-        line.setdefault("id", f"line-{i + 1:04d}")
-        normalised.append(line)
-    return write_json(episode_dir(series_id, number) / "script.json", normalised)
+    path = write_json(episode_dir(series_id, number) / "script.json", lines)
+    databricks_store.sync_episode_script(series_id, number, lines)
+    return path
 
 
 def save_episode_sound_plan(series_id: str, number: int, plan: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+    path = write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+    databricks_store.sync_episode_sound_plan(series_id, number, plan)
+    return path
 
 
 def save_episode_audio(series_id: str, number: int, manifest: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "audio.json", manifest)
-
-
-def save_episode_evaluation(series_id: str, number: int, evaluation: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "evaluation.json", evaluation)
+    path = write_json(episode_dir(series_id, number) / "audio.json", manifest)
+    databricks_store.sync_episode_audio(series_id, number, manifest)
+    return path
 
 
 def load_episode(series_id: str, number: int) -> dict[str, Any]:
@@ -488,7 +487,6 @@ def load_episode(series_id: str, number: int) -> dict[str, Any]:
         "script": read_json(d / "script.json", []) or [],
         "sound_plan": read_json(d / "sound_plan.json", {}) or {},
         "audio": read_json(d / "audio.json", {}) or {},
-        "evaluation": read_json(d / "evaluation.json", {}) or {},
     }
 
 
@@ -539,7 +537,7 @@ def episode_status(series_id: str, number: int) -> str:
     """planned -> scripted -> voiced -> ready (what the UI shows on each row)."""
     d = episode_dir(series_id, number)
     audio = read_json(d / "audio.json", {}) or {}
-    if audio.get("final") and Path(audio["final"]).exists() and not audio.get("stale"):
+    if audio.get("final") and Path(audio["final"]).exists():
         return "ready"
     if audio.get("voices"):
         return "voiced"
@@ -559,6 +557,7 @@ def save_index(series_id: str, **fields: Any) -> dict:
     card["updated_at"] = _now()
     card.setdefault("created_at", card["updated_at"])
     write_json(path, card)
+    databricks_store.sync_series(card)
     return card
 
 
@@ -569,7 +568,11 @@ def load_index(series_id: str) -> dict:
     card["generated_count"] = sum(
         1 for n in nums if episode_status(series_id, n) == "ready"
     )
+    # Computed at read time. save_index re-reads the raw file, so this never
+    # round-trips back into series.json.
+    card["has_thumbnail"] = thumbnail_path(series_id).exists()
     return card
+
 
 
 def list_series() -> list[dict]:
@@ -610,13 +613,10 @@ def hydrate(series_id: str) -> dict[str, Any]:
         "characters": bp["characters"],
         "clarification": inp["clarification"],
         "clarification_answers": inp["clarification_answers"],
-        "genre_tags": inp.get("confirmations", {}).get("genre_tags", []),
-        "theme_tags": inp.get("confirmations", {}).get("theme_tags", []),
         "blueprint": {
             "logline": bp["logline"], "story_world": bp["story_world"],
             "main_storyline": bp["main_storyline"], "tone": bp["tone"],
             "theme": bp["theme"], "characters": bp["characters"],
-            "story_beats": bp.get("story_beats", []),
         },
         "episodes": load_outlines(series_id),
         "scripts": load_scripts(series_id),

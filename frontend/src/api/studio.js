@@ -26,6 +26,8 @@ export async function listVoices() {
 }
 
 export const voiceSampleUrl = (voice) => apiUrl(`/studio/voices/${encodeURIComponent(voice)}/sample`)
+export const thumbnailUrl = (id) => apiUrl(`/studio/series/${id}/thumbnail`)
+export const characterImageUrl = (id, key) => apiUrl(`/studio/series/${id}/characters/${encodeURIComponent(key)}/image`)
 export const confirmCard = (id) => post(`/studio/series/${id}/confirm-card`, {})
 export const saveConfirmations = (id, data) => post(`/studio/series/${id}/confirmations`, data)
 export const regenerateAnalysis = (id) => post(`/studio/series/${id}/analysis/regenerate`, {})

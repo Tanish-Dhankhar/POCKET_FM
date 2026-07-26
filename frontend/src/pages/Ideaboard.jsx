@@ -355,6 +355,15 @@ export default function Ideaboard() {
                     <div className="absolute inset-0 flex items-center justify-center text-[5rem] font-bold text-white/[0.05] select-none">
                       {ch.name?.split(/\s+/).map((p) => p[0]).slice(0, 2).join('')}
                     </div>
+                    {/* Generated portrait, when it exists — initials stay as the fallback */}
+                    {ch.has_image && (
+                      <img
+                        src={studio.characterImageUrl(id, characterKey(ch))}
+                        alt=""
+                        loading="lazy"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-br from-neutral-700 to-black opacity-40 group-hover:opacity-55 transition-opacity" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent" />
                     <div className="absolute bottom-0 left-0 flex flex-col p-4 text-left">
@@ -683,8 +692,16 @@ export default function Ideaboard() {
           <div>
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900 text-neutral-500">
-                <UserRound className="h-9 w-9" strokeWidth={1.5} />
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900 text-neutral-500">
+                {characterDraft.has_image ? (
+                  <img
+                    src={studio.characterImageUrl(id, characterKey(characterDraft))}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <UserRound className="h-9 w-9" strokeWidth={1.5} />
+                )}
               </div>
               <div>
                 <h3 className="text-xl font-bold tracking-tight text-white">{characterDraft.name}</h3>

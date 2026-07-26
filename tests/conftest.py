@@ -15,12 +15,16 @@ import pytest
 
 from app import config, schemas
 
-# A minimal, valid 1x1 PNG — enough for tests to exercise real file I/O without
-# a real image-generation call.
-_TINY_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
-)
+# Tests must stay hermetic regardless of the developer's local .env: force the
+# Databricks dual-write mirror off so `store.save_*` calls throughout this
+# suite never attempt real network calls or write test data into a real
+# workspace, even if DATABRICKS_ENABLED=true is set for the running app.
+config.DATABRICKS_ENABLED = False
+
+# Same reasoning for artwork: gen_blueprint kicks off an image job, and no test
+# should ever spend money on an image API. Tests that exercise the image code
+# path enable it explicitly via monkeypatch.
+config.IMAGE_ENABLED = False
 
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +272,7 @@ def tmp_output(monkeypatch, tmp_path) -> Path:
     """Redirect all rendered artifacts into a temp dir."""
     out = tmp_path / "output"
     monkeypatch.setattr(config, "OUTPUT_DIR", out)
+    monkeypatch.setattr(config, "TTS_CACHE_DIR", out / "tts_cache")
     monkeypatch.setattr("app.nodes.audio.config.OUTPUT_DIR", out)
     return out
 

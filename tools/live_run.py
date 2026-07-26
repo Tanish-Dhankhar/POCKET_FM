@@ -1,4 +1,4 @@
-"""Drive the FULL pipeline against the real Gemini APIs and verify every artifact.
+"""Drive the full pipeline against the real OpenAI and Gemini APIs.
 
 This is the end-to-end acceptance run: real text generation, real TTS, real mix.
 It approves each review stage automatically and then asserts that everything the
@@ -62,7 +62,8 @@ def run(series_id: str, ep_count: int, ep_minutes: int) -> dict:
 
     print(f"\n{'='*72}\nLIVE RUN  series_id={series_id}  "
           f"episodes={ep_count} x {ep_minutes}min")
-    print(f"text={config.TEXT_MODEL}  tts={config.TTS_MODEL}\n{'='*72}\n")
+    print(f"text_hard={config.TEXT_MODEL_HARD}  text_easy={config.TEXT_MODEL_EASY}  "
+          f"tts={config.TTS_MODEL}\n{'='*72}\n")
 
     t0 = time.time()
     res = GRAPH.invoke(new_state(series_id, IDEA), cfg)

@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import jobs, store, story_service
+from . import jobs, store
 from .nodes import audio as audio_nodes
 from .nodes import text as text_nodes
 
 # Weight of each step, used only to render a coherent overall progress bar.
-STEPS = ["script", "voices", "sound", "mix", "evaluate"]
+STEPS = ["script", "voices", "sound", "mix"]
 
 
 def _state_for(series_id: str) -> dict[str, Any]:
@@ -56,7 +56,12 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
     def on_line(done: int, total: int) -> None:
         handle.progress(done, total, f"Voicing line {done} of {total}")
 
-    manifest = audio_nodes.render_episode_audio(state, number, progress=on_line)
+    try:
+        manifest = audio_nodes.render_episode_audio(
+            state, number, progress=on_line, cancelled=handle.cancelled,
+        )
+    except InterruptedError:
+        return {"cancelled": True, "step": "voices"}
     state.setdefault("audio_manifest", {})[str(number)] = manifest
 
     if handle.cancelled():
@@ -67,13 +72,15 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
     plan = audio_nodes.design_episode_sound(state, number)
     state.setdefault("sound_plans", {})[str(number)] = plan
 
+    if handle.cancelled():
+        return {"cancelled": True, "step": "sound"}
+
     # --- 4. mix ------------------------------------------------------------
     handle.step("mix", "Mixing the episode")
     final = audio_nodes.mix_episode(state, number)
 
-    # --- 5. evaluator ------------------------------------------------------
-    handle.step("evaluate", "Evaluating hook, pacing, and cliffhanger")
-    evaluation = story_service.evaluate_episode(series_id, number)
+    if handle.cancelled():
+        return {"cancelled": True, "step": "mix"}
 
     store.save_index(series_id, stage="episode_ready")
     return {
@@ -83,20 +90,15 @@ def generate_episode(series_id: str, number: int, handle: jobs.JobHandle,
         "sfx_cues": len(plan.get("sfx", [])),
         "duration_ms": final.get("total_ms"),
         "final": final.get("final"),
-        "evaluation_points": len(evaluation.get("points", [])),
         "status": store.episode_status(series_id, number),
     }
 
 
 def start_episode_job(series_id: str, number: int, *, force_script: bool = False) -> dict:
     """Start (or rejoin) a generation job for this episode."""
-    existing = jobs.find_active("episode", series_id=series_id, number=number)
-    if existing:
-        return existing  # a second click rejoins rather than duplicating the work
-
-    job_id = jobs.start(
+    return jobs.start_or_rejoin(
         "episode",
         lambda h: generate_episode(series_id, number, h, force_script=force_script),
+        dedupe_key=("episode", series_id, number),
         series_id=series_id, number=number, steps=STEPS,
     )
-    return jobs.get(job_id)

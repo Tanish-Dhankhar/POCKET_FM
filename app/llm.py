@@ -6,6 +6,9 @@ gets back a validated model instance — no manual JSON parsing anywhere else.
 from __future__ import annotations
 
 import json
+import random
+import threading
+import time
 from typing import TypeVar
 
 from google import genai
@@ -17,6 +20,7 @@ from . import config
 T = TypeVar("T", bound=BaseModel)
 
 _client: genai.Client | None = None
+_model_slots = threading.BoundedSemaphore(config.MODEL_MAX_CONCURRENCY)
 
 
 def client() -> genai.Client:
@@ -27,8 +31,34 @@ def client() -> genai.Client:
             raise RuntimeError(
                 "GEMINI_API_KEY is not set. Add it to the .env file at the project root."
             )
-        _client = genai.Client(api_key=config.GEMINI_API_KEY)
+        _client = genai.Client(
+            api_key=config.GEMINI_API_KEY,
+            http_options=types.HttpOptions(timeout=config.MODEL_TIMEOUT_MS),
+        )
     return _client
+
+
+def _is_retryable(err: Exception) -> bool:
+    text = str(err).lower()
+    return any(code in text for code in (
+        "429", "resource_exhausted", "rate limit", "500", "503",
+        "unavailable", "overloaded", "deadline", "timeout",
+    ))
+
+
+def _request(call):
+    """Bound and retry provider calls without logging creator prompts or output."""
+    last: Exception | None = None
+    for attempt in range(config.MODEL_MAX_RETRIES):
+        try:
+            with _model_slots:
+                return call()
+        except Exception as err:  # noqa: BLE001 - provider SDK has varied error types
+            if not _is_retryable(err) or attempt == config.MODEL_MAX_RETRIES - 1:
+                raise
+            last = err
+        time.sleep(min(8.0, 0.5 * (2 ** attempt)) + random.uniform(0, 0.25))
+    raise RuntimeError(f"model request failed after retries: {last}") from last
 
 
 def generate_text(prompt: str, *, thinking: str = config.THINK_LOW,
@@ -38,9 +68,9 @@ def generate_text(prompt: str, *, thinking: str = config.THINK_LOW,
         thinking_config=types.ThinkingConfig(thinking_level=thinking),
         system_instruction=system,
     )
-    resp = client().models.generate_content(
+    resp = _request(lambda: client().models.generate_content(
         model=config.TEXT_MODEL, contents=prompt, config=cfg,
-    )
+    ))
     return (resp.text or "").strip()
 
 
@@ -50,7 +80,7 @@ def transcribe_audio(data: bytes, mime_type: str = "audio/webm") -> str:
     Used by the mic flow: the creator speaks their story idea and we turn it into
     the plain text the pipeline expects. No separate STT model required.
     """
-    resp = client().models.generate_content(
+    resp = _request(lambda: client().models.generate_content(
         model=config.TEXT_MODEL,
         contents=[
             types.Part.from_bytes(data=data, mime_type=mime_type),
@@ -61,7 +91,7 @@ def transcribe_audio(data: bytes, mime_type: str = "audio/webm") -> str:
         config=types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(thinking_level=config.THINK_LOW),
         ),
-    )
+    ))
     return (resp.text or "").strip()
 
 
@@ -79,9 +109,9 @@ def generate_structured(prompt: str, schema: type[T], *,
         response_schema=schema,
         system_instruction=system,
     )
-    resp = client().models.generate_content(
+    resp = _request(lambda: client().models.generate_content(
         model=config.TEXT_MODEL, contents=prompt, config=cfg,
-    )
+    ))
     # Prefer the SDK's parsed object; fall back to manual validation of .text.
     parsed = getattr(resp, "parsed", None)
     if isinstance(parsed, schema):

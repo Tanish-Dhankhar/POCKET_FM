@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
-from .config import CLARIFY_QUESTION_COUNT
+from .config import CLARIFY_QUESTION_COUNT, PAUSE_BETWEEN_LINES_MS
 
 
 # ---------------------------------------------------------------------------
@@ -188,19 +188,108 @@ class MusicCue(BaseModel):
     start_line: int = Field(description="0-based index of the line where this bed starts")
     end_line: int = Field(description="0-based index of the line where this bed ends")
     mood: str = Field(description="must be an allowed music mood key from the manifest")
+    gain_db: Optional[float] = Field(
+        default=None,
+        description="authored bed gain in dB; null keeps the configured legacy level",
+    )
+    fade_in_ms: Optional[int] = Field(
+        default=None, description="optional bounded fade-in duration"
+    )
+    fade_out_ms: Optional[int] = Field(
+        default=None, description="optional bounded fade-out duration"
+    )
+    duck_under_dialogue: bool = Field(
+        default=True,
+        description="whether dialogue should lower this bed while speech is active",
+    )
+    duck_db: float = Field(
+        default=-10.0,
+        description="additional gain reduction in dB while dialogue is active",
+    )
+    duck_attack_ms: int = Field(default=80, description="music-duck attack time")
+    duck_hold_ms: int = Field(
+        default=180, description="hold across short gaps to prevent pumping"
+    )
+    duck_release_ms: int = Field(default=420, description="music-duck recovery time")
 
 
 class SfxCue(BaseModel):
     line: int = Field(description="0-based index of the line the effect lands on")
     name: str = Field(description="must be an allowed sfx key from the manifest")
+    offset_ms: int = Field(
+        default=0,
+        description="bounded offset from line start; a negative value pre-rolls the event",
+    )
+    gain_db: Optional[float] = Field(
+        default=None,
+        description="effect gain in dB; null keeps the configured legacy level",
+    )
+    pan: float = Field(default=0.0, description="stereo position from -1 (left) to +1 (right)")
+
+
+class DialogueEdit(BaseModel):
+    """Non-destructive editorial choices for one rendered speech line."""
+
+    line: int = Field(description="0-based script-line index")
+    pause_before_ms: int = Field(
+        default=0, description="silence or room-tone beat immediately before this line"
+    )
+    pause_after_ms: int = Field(
+        default=PAUSE_BETWEEN_LINES_MS,
+        description="turn-taking beat immediately after this line",
+    )
+    rate: float = Field(
+        default=1.0,
+        description="playback tempo multiplier; 1.0 preserves the generated take",
+    )
+    gain_db: float = Field(default=0.0, description="non-destructive clip gain in dB")
+    trim_tail_ms: int = Field(
+        default=0,
+        description=(
+            "destructively unheard tail of the immutable take; use only to make an "
+            "explicit interruption cut a sentence off"
+        ),
+    )
+    fade_in_ms: int = Field(
+        default=0, description="short anti-click fade at the edited clip entrance"
+    )
+    fade_out_ms: int = Field(
+        default=0, description="short anti-click fade at a deliberately cut clip ending"
+    )
+    overlap_previous_ms: int = Field(
+        default=0,
+        validation_alias=AliasChoices("overlap_previous_ms", "overlap_ms"),
+        description="how far this line begins before the preceding speech line ends",
+    )
+    interrupt: bool = Field(
+        default=False,
+        description="intentional interruption rather than incidental crosstalk",
+    )
+
+
+class AmbienceCue(BaseModel):
+    start_line: int = Field(description="0-based line where the ambience begins")
+    end_line: int = Field(description="0-based line where the ambience ends")
+    name: str = Field(description="allowed ambience/SFX asset key from the manifest")
+    gain_db: float = Field(default=-24.0, description="quiet authored ambience-bed gain")
+    fade_in_ms: int = Field(default=800, description="bounded fade-in duration")
+    fade_out_ms: int = Field(default=800, description="bounded fade-out duration")
 
 
 class SoundPlan(BaseModel):
+    dialogue: list[DialogueEdit] = Field(
+        default_factory=list,
+        description="post-TTS timing, pace, level and overlap choices",
+    )
     music: list[MusicCue] = Field(
         default_factory=list, description="sparse; silence is fine — omit when unneeded"
     )
     sfx: list[SfxCue] = Field(
         default_factory=list, description="only for concrete, script-mentioned events"
+    )
+    ambience: list[AmbienceCue] = Field(
+        default_factory=list,
+        description="optional quiet environmental beds; sparse and scene-length only",
     )
 
 

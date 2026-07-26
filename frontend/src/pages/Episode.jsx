@@ -14,16 +14,17 @@ const stepProgress = {script:12,voices:42,sound:72,mix:88,evaluate:96}
 function clock(seconds) { if (!Number.isFinite(seconds)) return '0:00'; const whole=Math.floor(seconds); return `${Math.floor(whole/60)}:${String(whole%60).padStart(2,'0')}` }
 
 export default function Episode() {
-  const {id,number} = useParams(); const episodeNumber=Number(number); const navigate=useNavigate(); const queryClient=useQueryClient()
-  const audioRef=useRef(null); const scrollRef=useRef(null); const [lines,setLines]=useState([]); const [editing,setEditing]=useState(false)
-  const [playing,setPlaying]=useState(false); const [time,setTime]=useState(0); const [duration,setDuration]=useState(0); const [jobId,setJobId]=useState(null)
-  const {data,isLoading,error} = useQuery({queryKey:['episode',id,episodeNumber],queryFn:() => studio.getEpisode(id,episodeNumber)})
-  useEffect(() => { setLines((data?.script || []).map((line,index) => { const parsed=splitEmotion(line.text || ''); return {...line,id:line.id || `line-${String(index+1).padStart(4,'0')}`,text:parsed.text,emotion:line.emotion || parsed.emotion || null} })) },[data?.script])
-  const save=useMutation({mutationFn:() => studio.putScript(id,episodeNumber,lines),onSuccess:() => {queryClient.invalidateQueries({queryKey:['episode',id,episodeNumber]});setEditing(false)}})
-  const render=useMutation({mutationFn:() => studio.generateEpisode(id,episodeNumber,false),onSuccess:(job) => setJobId(job.id)})
-  const evaluate=useMutation({mutationFn:() => studio.evaluateEpisode(id,episodeNumber),onSuccess:() => queryClient.invalidateQueries({queryKey:['episode',id,episodeNumber]})})
-  const job=useQuery({queryKey:['job',jobId],queryFn:() => studio.getJob(jobId),enabled:Boolean(jobId),refetchInterval:(query) => ['done','error'].includes(query.state.data?.state) ? false : 1000})
-  useEffect(() => { if (job.data?.state === 'done') {queryClient.invalidateQueries({queryKey:['episode',id,episodeNumber]});setJobId(null)} },[job.data?.state,id,episodeNumber,queryClient])
+  const { id, number } = useParams()
+  const episodeNumber = Number(number)
+  const queryClient = useQueryClient()
+  const [lines, setLines] = useState([])
+  const [jobId, setJobId] = useState(null)
+  const { data, isLoading, error } = useQuery({ queryKey: ['episode', id, episodeNumber], queryFn: () => studio.getEpisode(id, episodeNumber) })
+  useEffect(() => { setLines(Array.isArray(data?.script) ? data.script : []) }, [data?.script])
+  const save = useMutation({ mutationFn: () => studio.putScript(id, episodeNumber, lines), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['episode', id, episodeNumber] }) })
+  const render = useMutation({ mutationFn: () => studio.generateEpisode(id, episodeNumber, false), onSuccess: (job) => setJobId(job.id) })
+  const job = useQuery({ queryKey: ['job', jobId], queryFn: () => studio.getJob(jobId), enabled: Boolean(jobId), refetchInterval: (q) => ['done','error','cancelled'].includes(q.state.data?.state) ? false : 2000 })
+  useEffect(() => { if (job.data?.state === 'done') queryClient.invalidateQueries({ queryKey: ['episode', id, episodeNumber] }) }, [job.data?.state, queryClient, id, episodeNumber])
 
   const segments=data?.audio?.segments || []; const ratio=duration ? time/duration : 0
   const activeLine=useMemo(() => { const ms=time*1000; const found=segments.find((segment) => ms >= segment.start_ms && ms < segment.end_ms); return found?.line_index ?? -1 },[segments,time])
@@ -37,16 +38,17 @@ export default function Episode() {
   if (error) return <div className="empty"><div><h2>Episode unavailable.</h2><p className="error">{error.message}</p><button className="button" onClick={() => navigate(`/series/${id}`)}>Back to series</button></div></div>
   const outline=data?.outline || {}; const evaluation=data?.evaluation || {}
 
-  return <section className="episode-screen">
-    <header className="episode-chrome"><button className="wordmark" onClick={() => navigate('/')} style={{border:0,background:'transparent',cursor:'pointer',padding:0}}><PocketLogo /></button><button onClick={() => navigate(`/series/${id}`)}><ArrowLeft size={15}/> Idea Board</button></header>
-    <div className="episode-inner"><div className="episode-heading"><p>Episode {episodeNumber} · Preview</p><h1>{outline.title || `Episode ${episodeNumber}`}</h1></div>
-      <section className="audio-preview"><div className="audio-preview-head"><div><p>Audio Preview</p><span>{audioReady ? `${clock(duration)} · final mix` : data?.audio?.stale ? 'Script changed · regenerate audio' : 'Audio has not been generated'}</span></div>{audioReady && <a href={studio.audioUrl(id,episodeNumber)} download title="Download audio"><Download size={17}/></a>}</div>
-        {audioReady ? <><audio ref={audioRef} preload="metadata" src={studio.audioUrl(id,episodeNumber,data?.audio?.total_ms || '')} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => {setPlaying(false);setTime(0)}}/><div className="audio-controls"><button onClick={toggleAudio}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="waveform" onClick={seek}>{bars.map((height,index) => <span key={index} className={index/bars.length <= ratio ? 'played' : ''} style={{height:`${height}%`}}/>)}</div><time>{clock(time)} / {clock(duration)}</time></div></> : <button className="episode-action render-audio" onClick={() => render.mutate()} disabled={render.isPending}><Sparkles size={14}/> {data?.audio?.stale ? 'Regenerate audio' : 'Generate audio'}</button>}
-      </section>
-      <div className="episode-content"><section className="dialogue-panel"><div className="panel-head"><div><p>Dialogues</p><span>{lines.length} lines · all characters</span></div><button onClick={() => editing ? save.mutate() : setEditing(true)}>{editing ? <Save size={14}/> : <Pencil size={14}/>} {editing ? 'Save script' : 'Edit'}</button></div><div className="dialogue-scroll" ref={scrollRef}>{lines.map((line,index) => { const current=index === activeLine; const played=segments.some((segment) => segment.line_index === index && time*1000 >= segment.end_ms); return <article id={line.id} className={`dialogue-line-card ${current ? 'current' : played ? 'played' : ''}`} aria-current={current ? 'true' : undefined} key={line.id || index}><div className="dialogue-meta">{current && <i/>}{editing ? <input value={line.speaker || ''} onChange={(e) => updateLine(index,'speaker',e.target.value)}/> : <strong>{line.speaker}</strong>}{editing ? <select value={line.emotion || ''} onChange={(e) => updateLine(index,'emotion',e.target.value)}><option value="">Natural</option>{emotions.map((emotion) => <option key={emotion}>{emotion}</option>)}</select> : line.emotion && <span>{line.emotion}</span>}</div>{editing ? <textarea value={line.text || ''} onChange={(e) => updateLine(index,'text',e.target.value)}/> : <p>{line.text}</p>}</article>})}</div>{save.error && <p className="notice error">{save.error.message}</p>}</section>
-        <aside className="episode-side"><section><p className="card-label">Episode Outline</p><p>{outline.summary || 'No summary available.'}</p>{outline.main_events?.length > 0 && <ul>{outline.main_events.map((event) => <li key={event}>{event}</li>)}</ul>}{outline.cliffhanger && <div className="outline-cliff"><strong>Cliffhanger</strong><span>{outline.cliffhanger}</span></div>}</section><section><div className="judge-head"><p className="card-label">AI Evaluator Judge</p><button onClick={() => evaluate.mutate()} disabled={evaluate.isPending}>{evaluation.points?.length ? 'Refresh' : 'Evaluate'}</button></div>{evaluation.stale && <p className="stale-note">Script changed. Refresh this evaluation.</p>}<ul className="judge-list">{(evaluation.points || []).map((point,index) => <li key={`${point.category}-${index}`}><i/><div><strong>{point.category}</strong><p>{point.assessment}</p><span>{point.suggestion}</span></div></li>)}</ul>{!evaluation.points?.length && <p className="muted">Generate the script evaluation to see focused notes on hook, pacing, voices, and cliffhanger.</p>}{evaluate.error && <p className="error">{evaluate.error.message}</p>}</section></aside>
-      </div>
-    </div>
-    {jobId && <GenerationLoader mode="episode" message={job.data?.message || 'Preparing generation…'} progress={stepProgress[job.data?.step] || 7} error={job.data?.state === 'error' ? job.data.error : render.error?.message} onBack={() => setJobId(null)}/>} 
-  </section>
+  return <div className="episode-page">
+    <div className="topbar"><Link className="brand" to={`/series/${id}`}>← <span>{outline.title || `Episode ${episodeNumber}`}</span></Link><span className={`chip ${audioReady ? 'success' : ''}`}>{audioReady ? 'Audio ready' : data?.audio?.stale ? 'Audio needs re-render' : data?.status || 'Draft'}</span></div>
+    <p className="eyebrow">Episode {String(episodeNumber).padStart(2,'0')}</p><h1>{outline.title || `Episode ${episodeNumber}`}</h1><p className="lead">{outline.summary}</p>
+    {audioReady && <div className="audio-player"><audio controls preload="metadata" src={studio.audioUrl(id, episodeNumber, data?.audio?.total_ms || Date.now())} /><div className="row between" style={{marginTop:8}}><span className="muted" style={{fontSize:12}}>Final mix with voices and restrained sound design</span><a className="button ghost small" href={studio.audioUrl(id, episodeNumber)} download>Download</a></div></div>}
+    {!audioReady && <div className="notice" style={{margin:'24px 0'}}>{data?.audio?.stale ? 'The script changed, so the old audio was marked stale.' : 'No final audio yet.'} <button className="button primary small" style={{marginLeft:10}} disabled={busy} onClick={() => render.mutate()}>{busy ? job.data?.message || 'Rendering…' : 'Generate audio'}</button>{job.data?.state === 'error' && <span className="error"> {job.data.error}</span>}{job.data?.state === 'cancelled' && <span className="muted"> Generation cancelled.</span>}</div>}
+    <div className="section-head" style={{marginTop:36}}><div><p className="eyebrow">Script</p><h2 style={{margin:0}}>{lines.length} lines</h2></div><button className="button primary" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save script'}</button></div>
+    {save.isSuccess && <p className="notice">Saved. Existing audio is now marked stale until you re-render it.</p>}
+    {save.error && <p className="error">{save.error.message}</p>}
+    <div className="script-lines">{lines.map((line, index) => {
+      const parsed = splitEmotion(line.text)
+      return <div className="script-line" key={index}><div><input className="input speaker" value={line.speaker || ''} onChange={(e) => update(index, 'speaker', e.target.value)} /><select className="select emotion" value={parsed.emotion} onChange={(e) => updateEmotion(index, e.target.value)}><option value="">Natural</option>{['Calm','Curious','Whisper','Fear','Panic','Anger','Relief','Joy','Sad','Excited','Nervous','Serious','Sarcastic','Tender','Shouting','Trembling','Pleading','Cold','Amused','Determined'].map((tag) => <option key={tag}>{tag}</option>)}</select></div><textarea className="line-input" value={parsed.text} onChange={(e) => updateText(index, e.target.value)} /></div>
+    })}</div>
+  </div>
 }
