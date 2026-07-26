@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +40,8 @@ def _voice_for(state: SeriesState, speaker: str) -> str:
 # --------------------------------------------------------------------------- #
 # Stage 8 — Audio generation (TTS per line, concatenated)
 # --------------------------------------------------------------------------- #
-def render_episode_audio(state: SeriesState, number: int,
-                         progress=None) -> dict[str, Any]:
+def render_episode_audio(state: SeriesState, number: int, progress=None,
+                         cancelled=None) -> dict[str, Any]:
     """TTS every line of ONE episode, stitch it, and persist audio.json.
 
     `progress(done, total)` is called after each line so a job runner can report
@@ -53,57 +52,34 @@ def render_episode_audio(state: SeriesState, number: int,
     if not lines:
         raise ValueError(f"episode {number} has no script yet")
 
-    cache_dir = store.series_dir(sid) / "tts_cache"
+    cache_dir = config.TTS_CACHE_DIR
     ldir = store.lines_dir(sid, number)
     speakable = [(i, ln) for i, ln in enumerate(lines) if (ln.get("text") or "").strip()]
 
-    def render(item):
-        i, ln = item
+    line_files: list[str] = []
+    for done, (i, ln) in enumerate(speakable, start=1):
+        if cancelled and cancelled():
+            raise InterruptedError("episode generation cancelled")
         voice = _voice_for(state, ln.get("speaker", "Narrator"))
         safe = _SAFE.sub("_", ln.get("speaker", "x"))[:20]
         out = ldir / f"{i:04d}_{safe}.wav"
-        text = ln["text"].strip()
-        emotion = str(ln.get("emotion") or "").strip()
-        if emotion:
-            text = f"[{emotion}] {text}"
-        render_line(text, voice, out, cache_dir=cache_dir)
-        return i, str(out)
+        render_line(ln["text"].strip(), voice, out, cache_dir=cache_dir)
+        line_files.append(str(out))
+        if progress:
+            progress(done, len(speakable))
 
-    rendered: dict[int, str] = {}
-    workers = min(config.TTS_PARALLEL_WORKERS, len(speakable)) or 1
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tts-line") as pool:
-        futures = [pool.submit(render, item) for item in speakable]
-        for done, future in enumerate(as_completed(futures), start=1):
-            i, path = future.result()
-            rendered[i] = path
-            if progress:
-                progress(done, len(speakable))
-
-    # Synthesis can finish out of order; the final dialogue track must not.
-    line_files = [rendered[i] for i, _ in speakable]
+    if cancelled and cancelled():
+        raise InterruptedError("episode generation cancelled")
 
     track, offsets = audio_engine.concat_lines(line_files)
     voices_path = _ep_dir(state, number) / f"ep{int(number):02d}_voices.wav"
     audio_engine.export(track, voices_path)
-
-    segments = []
-    for order, ((line_index, line), path) in enumerate(zip(speakable, line_files)):
-        start_ms = offsets[order]
-        end_ms = offsets[order + 1] if order + 1 < len(offsets) else len(track)
-        segments.append({
-            "line_id": line.get("id") or f"line-{line_index + 1:04d}",
-            "line_index": line_index,
-            "start_ms": start_ms,
-            "end_ms": end_ms,
-        })
 
     manifest = {
         "voices": str(voices_path),
         "offsets": offsets,
         "total_ms": len(track),
         "line_files": line_files,
-        "segments": segments,
-        "stale": False,
     }
     store.save_episode_audio(sid, number, manifest)
     return manifest

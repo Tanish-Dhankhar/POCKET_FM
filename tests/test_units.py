@@ -12,6 +12,7 @@ from app import assets, config, prompts, schemas
 # config
 # --------------------------------------------------------------------------- #
 def test_api_key_is_configured():
+    assert config.OPENAI_API_KEY, "OPENAI_API_KEY missing from .env"
     assert config.GEMINI_API_KEY, "GEMINI_API_KEY missing from .env"
 
 
@@ -36,6 +37,18 @@ def test_sound_manifest_exists_and_parses():
     assert config.SOUND_MANIFEST.exists(), "run: python -m tools.build_assets"
     data = json.loads(config.SOUND_MANIFEST.read_text())
     assert data["music"] and data["sfx"]
+
+
+def test_sound_manifest_uses_only_documented_v2_assets():
+    data = json.loads(config.SOUND_MANIFEST.read_text(encoding="utf-8"))
+    assert data["library_version"] >= 2
+    for kind in ("music", "sfx"):
+        for entry in data[kind].values():
+            assert entry["file"].startswith("library/v2/")
+            assert entry.get("license") and "placeholder" not in entry["license"].lower()
+            assert entry.get("license_url")
+            assert entry.get("source")
+            assert entry.get("download_url")
 
 
 @pytest.mark.parametrize("mood", assets.music_moods())

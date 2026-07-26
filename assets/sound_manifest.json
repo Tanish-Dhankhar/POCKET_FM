@@ -1,184 +1,242 @@
 {
+  "library_version": 2,
+  "selected_at": "2026-07-26",
   "music": {
     "romantic": {
-      "file": "music/romantic.wav",
+      "file": "library/v2/music/romantic_mixkit_659.mp3",
+      "title": "Romantic",
+      "creator": "Francisco Alvear",
+      "duration_seconds": 159,
       "loopable": true,
-      "keywords": [
-        "love",
-        "tender",
-        "warm"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["love", "tender", "reflective", "piano"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/mood/romantic/",
+      "download_url": "https://assets.mixkit.co/music/659/659.mp3"
     },
     "emotional": {
-      "file": "music/emotional.wav",
+      "file": "library/v2/music/emotional_mixkit_681.mp3",
+      "title": "Classical vibes 1",
+      "creator": "Grigoriy Nuzhny",
+      "duration_seconds": 110,
       "loopable": true,
-      "keywords": [
-        "sad",
-        "reflective",
-        "soft"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["reflective", "melancholic", "human drama", "piano"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/mood/emotional/",
+      "download_url": "https://assets.mixkit.co/music/681/681.mp3"
     },
     "hopeful": {
-      "file": "music/hopeful.wav",
+      "file": "library/v2/music/hopeful_mixkit_587.mp3",
+      "title": "Discover",
+      "creator": "Eugenio Mininni",
+      "duration_seconds": 144,
       "loopable": true,
-      "keywords": [
-        "uplifting",
-        "bright"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["hopeful", "uplifting", "orchestral", "reflective"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/mood/hopeful/",
+      "download_url": "https://assets.mixkit.co/music/587/587.mp3"
     },
     "tense": {
-      "file": "music/tense.wav",
+      "file": "library/v2/music/tense_mixkit_871.mp3",
+      "title": "Fright Night",
+      "creator": "Michael Ramir C.",
+      "duration_seconds": 101,
       "loopable": true,
-      "keywords": [
-        "suspense",
-        "anxious"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["suspense", "eerie", "atmospheric", "thriller"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/mood/tension/",
+      "download_url": "https://assets.mixkit.co/music/871/871.mp3"
     },
     "horror": {
-      "file": "music/horror.wav",
+      "file": "library/v2/music/horror_mixkit_671.mp3",
+      "title": "Piano Horror",
+      "creator": "Francisco Alvear",
+      "duration_seconds": 113,
       "loopable": true,
-      "keywords": [
-        "scary",
-        "dread",
-        "creepy"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["eerie", "nightmarish", "piano", "horror"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/mood/scary/",
+      "download_url": "https://assets.mixkit.co/music/671/671.mp3"
     },
     "mystery": {
-      "file": "music/mystery.wav",
+      "file": "library/v2/music/mystery_mixkit_615.mp3",
+      "title": "Tapis",
+      "creator": "Eugenio Mininni",
+      "duration_seconds": 163,
       "loopable": true,
-      "keywords": [
-        "intrigue",
-        "noir"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["mysterious", "atmospheric", "synth", "investigation"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/mood/mysterious/",
+      "download_url": "https://assets.mixkit.co/music/615/615.mp3"
     },
     "action": {
-      "file": "music/action.wav",
+      "file": "library/v2/music/action_mixkit_680.mp3",
+      "title": "Epical Drums 05",
+      "creator": "Grigoriy Nuzhny",
+      "duration_seconds": 102,
       "loopable": true,
-      "keywords": [
-        "battle",
-        "chase",
-        "fight"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["action", "dramatic", "drums", "intense"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/tag/action/",
+      "download_url": "https://assets.mixkit.co/music/680/680.mp3"
     },
     "ambient": {
-      "file": "music/ambient.wav",
+      "file": "library/v2/music/ambient_mixkit_251.mp3",
+      "title": "Ambient",
+      "creator": "Arulo",
+      "duration_seconds": 114,
       "loopable": true,
-      "keywords": [
-        "calm",
-        "neutral",
-        "background"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "keywords": ["calm", "neutral", "atmospheric", "background"],
+      "license": "Mixkit Stock Music Free License",
+      "license_url": "https://mixkit.co/license/#musicFree",
+      "source": "https://mixkit.co/free-stock-music/ambient/",
+      "download_url": "https://assets.mixkit.co/music/251/251.mp3"
     }
   },
   "sfx": {
     "thunder": {
-      "file": "sfx/thunder.wav",
-      "keywords": [
-        "lightning",
-        "storm"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/thunder_mixkit_1297.wav",
+      "title": "Big thunder rumble",
+      "keywords": ["thunder", "storm", "rumble"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/thunder/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/1297/1297.wav"
     },
     "rain": {
-      "file": "sfx/rain.wav",
-      "keywords": [
-        "rainfall",
-        "drizzle"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/rain_mixkit_2393.wav",
+      "title": "Light rain loop",
+      "keywords": ["rain", "drizzle", "ambience", "loop"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/rain/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/2393/2393.wav"
     },
     "wind": {
-      "file": "sfx/wind.wav",
-      "keywords": [
-        "breeze",
-        "gale"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/wind_mixkit_2658.wav",
+      "title": "Wind blowing ambience",
+      "keywords": ["wind", "breeze", "nature", "ambience"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/wind/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/2658/2658.wav"
     },
     "footsteps": {
-      "file": "sfx/footsteps.wav",
-      "keywords": [
-        "walking",
-        "steps"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/footsteps_mixkit_542.wav",
+      "title": "Footsteps on heels on the pavement",
+      "keywords": ["footsteps", "walking", "heels", "pavement"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/footsteps/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/542/542.wav"
     },
     "door_creak": {
-      "file": "sfx/door_creak.wav",
-      "keywords": [
-        "door",
-        "hinge",
-        "open"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/door_creak_mixkit_195.wav",
+      "title": "Creaky door open",
+      "keywords": ["door", "creak", "wood", "open"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/doors/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/195/195.wav"
     },
     "birds": {
-      "file": "sfx/birds.wav",
-      "keywords": [
-        "forest",
-        "nature",
-        "morning"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/birds_mixkit_17.wav",
+      "title": "Little birds singing in the trees",
+      "keywords": ["birds", "morning", "forest", "nature"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/bird/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/17/17.wav"
     },
     "heartbeat": {
-      "file": "sfx/heartbeat.wav",
-      "keywords": [
-        "pulse",
-        "fear",
-        "tension"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/heartbeat_mixkit_493.wav",
+      "title": "Fast Heartbeat",
+      "keywords": ["heartbeat", "pulse", "fear", "tension"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/heartbeat/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/493/493.wav"
     },
     "clock_tick": {
-      "file": "sfx/clock_tick.wav",
-      "keywords": [
-        "deadline",
-        "time"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/clock_tick_mixkit_1059.wav",
+      "title": "Tick tock clock close up",
+      "keywords": ["clock", "tick", "time", "suspense"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/clock/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/1059/1059.wav"
     },
     "sword_clash": {
-      "file": "sfx/sword_clash.wav",
-      "keywords": [
-        "battle",
-        "fight",
-        "metal"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/sword_clash_mixkit_2160.wav",
+      "title": "Metallic sword strike",
+      "keywords": ["sword", "metal", "strike", "fight"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/sword/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/2160/2160.wav"
     },
     "glass_break": {
-      "file": "sfx/glass_break.wav",
-      "keywords": [
-        "shatter",
-        "crash"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/glass_break_mixkit_759.wav",
+      "title": "Glass break with hammer thud",
+      "keywords": ["glass", "break", "shatter", "impact"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/glass/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/759/759.wav"
     },
     "crowd": {
-      "file": "sfx/crowd.wav",
-      "keywords": [
-        "market",
-        "people",
-        "festival"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/crowd_mixkit_368.wav",
+      "title": "People in fair ambience and laughter",
+      "keywords": ["crowd", "people", "fair", "ambience"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/crowd/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/368/368.wav"
     },
     "phone_ring": {
-      "file": "sfx/phone_ring.wav",
-      "keywords": [
-        "call",
-        "ringtone"
-      ],
-      "license": "PLACEHOLDER-synth (replace with CC0)"
+      "file": "library/v2/sfx/phone_ring_mixkit_1356.wav",
+      "title": "Vintage telephone ringtone",
+      "keywords": ["phone", "ring", "telephone", "call"],
+      "license": "Mixkit Sound Effects Free License",
+      "license_url": "https://mixkit.co/license/",
+      "source": "https://mixkit.co/free-sound-effects/phone-ring/",
+      "download_url": "https://assets.mixkit.co/active_storage/sfx/1356/1356.wav"
+    },
+    "room_tone": {
+      "file": "library/v2/sfx/room_tone_freesound_860933.mp3",
+      "title": "Room Tone Small Apartment",
+      "creator": "artemditkovsky",
+      "keywords": ["apartment", "interior", "quiet", "dialogue"],
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source": "https://freesound.org/people/artemditkovsky/sounds/860933/",
+      "download_url": "https://cdn.freesound.org/previews/860/860933_9079786-hq.mp3"
+    },
+    "post_crying_sniff": {
+      "file": "library/v2/sfx/post_crying_sniff_freesound_196395.mp3",
+      "title": "sniffing_sounds.wav",
+      "creator": "scottemoil",
+      "keywords": ["sniff", "crying", "nose", "breath"],
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source": "https://freesound.org/people/scottemoil/sounds/196395/",
+      "download_url": "https://cdn.freesound.org/previews/196/196395_3399958-hq.mp3"
+    },
+    "tea_cup_clank": {
+      "file": "library/v2/sfx/tea_cup_clank_freesound_547489.mp3",
+      "title": "MugClinks.wav",
+      "creator": "sidequesting",
+      "keywords": ["ceramic", "mug", "cup", "clink"],
+      "license": "CC0 1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source": "https://freesound.org/people/sidequesting/sounds/547489/",
+      "download_url": "https://cdn.freesound.org/previews/547/547489_10247258-hq.mp3"
     }
   }
 }

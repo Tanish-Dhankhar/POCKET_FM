@@ -29,7 +29,11 @@ def _create(client, idea="A nurse, a ghost, three nights.") -> dict:
 def test_health_reports_configured_models(client):
     body = client.get("/health").json()
     assert body["ok"] is True
-    assert body["text_model"] == config.TEXT_MODEL
+    assert body["text_models"] == {
+        "hard": config.TEXT_MODEL_HARD,
+        "easy": config.TEXT_MODEL_EASY,
+    }
+    assert body["transcription_model"] == config.TRANSCRIPTION_MODEL
     assert body["tts_model"] == config.TTS_MODEL
 
 
