@@ -82,6 +82,14 @@ def _active_count() -> int:
     return sum(j["state"] in ("queued", "running") for j in _JOBS.values())
 
 
+def _active_story_count() -> int:
+    """How many story-generation jobs are currently queued or running."""
+    return sum(
+        j["state"] in ("queued", "running") and j.get("kind") in config.STORY_JOB_KINDS
+        for j in _JOBS.values()
+    )
+
+
 def _clear_active_key(job: dict[str, Any]) -> None:
     key = job.get("dedupe_key")
     if key and _ACTIVE_KEYS.get(key) == job["id"]:
@@ -101,6 +109,14 @@ def start_or_rejoin(kind: str, fn: Callable[[JobHandle], Any], *,
 
         if _active_count() >= config.JOB_MAX_QUEUE:
             raise QueueFullError("generation queue is full; please retry shortly")
+
+        # At most STORY_MAX_CONCURRENCY story jobs may run at once. Rejoins
+        # above already returned, so this only blocks genuinely new work.
+        if kind in config.STORY_JOB_KINDS and _active_story_count() >= config.STORY_MAX_CONCURRENCY:
+            raise QueueFullError(
+                f"at most {config.STORY_MAX_CONCURRENCY} stories can be generated at once; "
+                "please retry shortly"
+            )
 
         job_id = uuid.uuid4().hex[:12]
         _JOBS[job_id] = {
@@ -186,7 +202,9 @@ def summary() -> dict[str, int]:
         return {
             "queued": sum(j["state"] == "queued" for j in _JOBS.values()),
             "running": sum(j["state"] == "running" for j in _JOBS.values()),
+            "story_active": _active_story_count(),
             "retained": len(_JOBS),
             "max_concurrency": config.JOB_MAX_CONCURRENCY,
+            "max_story_concurrency": config.STORY_MAX_CONCURRENCY,
             "max_queue": config.JOB_MAX_QUEUE,
         }
