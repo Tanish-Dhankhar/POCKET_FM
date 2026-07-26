@@ -164,40 +164,43 @@ export default function AILoadingScreen() {
 
       {/* Animation stage */}
       <div className="relative flex h-[500px] w-full max-w-md -translate-y-12 items-center justify-center">
-        {/* Carton group — shifted 100px left */}
-        <div className="absolute inset-0" style={{ transform: 'translateX(-100px)' }}>
-        {/* Flaring red energy behind the hopper */}
-        <motion.div
-          className="absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full"
-          style={{
-            background:
-              'radial-gradient(circle, rgba(230,28,56,0.55) 0%, rgba(230,28,56,0.12) 40%, rgba(0,0,0,0) 70%)',
-            filter: 'blur(8px)',
-          }}
-          animate={{
-            opacity: [0.15, 0.4, 0.15, 0.7, 0.15],
-            scale: [0.85, 1.05, 0.9, 1.25, 0.85],
-          }}
-          transition={syncTiming}
-        />
+        {/* Flaring red energy behind the hopper.
+            Centering translate lives on a static wrapper so Framer Motion
+            scale/opacity animations don't overwrite it. */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <motion.div
+            className="h-64 w-64 rounded-full"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(230,28,56,0.55) 0%, rgba(230,28,56,0.12) 40%, rgba(0,0,0,0) 70%)',
+              filter: 'blur(8px)',
+            }}
+            animate={{
+              opacity: [0.15, 0.4, 0.15, 0.7, 0.15],
+              scale: [0.85, 1.05, 0.9, 1.25, 0.85],
+            }}
+            transition={syncTiming}
+          />
+        </div>
 
         {/* Central carton hopper */}
-        <motion.div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-          animate={{
-            scale: [1, 1.03, 1, 1.05, 1],
-            filter: [
-              'drop-shadow(0 0 0px rgba(230,28,56,0))',
-              'drop-shadow(0 0 10px rgba(230,28,56,0.35))',
-              'drop-shadow(0 0 6px rgba(230,28,56,0.15))',
-              'drop-shadow(0 0 18px rgba(230,28,56,0.7))',
-              'drop-shadow(0 0 0px rgba(230,28,56,0))',
-            ],
-          }}
-          transition={syncTiming}
-        >
-          <Box className="h-48 w-48" />
-        </motion.div>
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <motion.div
+            animate={{
+              scale: [1, 1.03, 1, 1.05, 1],
+              filter: [
+                'drop-shadow(0 0 0px rgba(230,28,56,0))',
+                'drop-shadow(0 0 10px rgba(230,28,56,0.35))',
+                'drop-shadow(0 0 6px rgba(230,28,56,0.15))',
+                'drop-shadow(0 0 18px rgba(230,28,56,0.7))',
+                'drop-shadow(0 0 0px rgba(230,28,56,0))',
+              ],
+            }}
+            transition={syncTiming}
+          >
+            <Box className="h-48 w-48" />
+          </motion.div>
+        </div>
 
         {/* Falling ingredient items */}
         {FALLING_ITEMS.map(({ key, Icon }, i) => {
@@ -219,29 +222,30 @@ export default function AILoadingScreen() {
         })}
 
         {/* Reveal: levitating script icon */}
-        <motion.div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-          animate={{
-            y: [0, 0, REVEAL_ICON_Y, REVEAL_ICON_Y, REVEAL_ICON_Y - 30, 0],
-            opacity: [0, 0, 1, 1, 0, 0],
-            scale: [0.4, 0.4, 1, 1, 1.35, 0.4],
-            filter: ['blur(4px)', 'blur(4px)', 'blur(0px)', 'blur(0px)', 'blur(6px)', 'blur(4px)'],
-          }}
-          transition={{
-            duration: CYCLE,
-            repeat: Infinity,
-            times: [0, t(REVEAL_START), t(REVEAL_UP), t(REVEAL_HOVER), t(REVEAL_DISSOLVE), 1],
-            ease: 'easeInOut',
-          }}
-        >
-          <div className="relative flex items-center justify-center">
-            <div className="absolute h-16 w-16 rounded-full bg-[#E61C38]/40 blur-xl" />
-            <FileText
-              className="relative h-12 w-12 text-white drop-shadow-[0_0_10px_rgba(230,28,56,0.9)]"
-              strokeWidth={1.25}
-            />
-          </div>
-        </motion.div>
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <motion.div
+            animate={{
+              y: [0, 0, REVEAL_ICON_Y, REVEAL_ICON_Y, REVEAL_ICON_Y - 30, 0],
+              opacity: [0, 0, 1, 1, 0, 0],
+              scale: [0.4, 0.4, 1, 1, 1.35, 0.4],
+              filter: ['blur(4px)', 'blur(4px)', 'blur(0px)', 'blur(0px)', 'blur(6px)', 'blur(4px)'],
+            }}
+            transition={{
+              duration: CYCLE,
+              repeat: Infinity,
+              times: [0, t(REVEAL_START), t(REVEAL_UP), t(REVEAL_HOVER), t(REVEAL_DISSOLVE), 1],
+              ease: 'easeInOut',
+            }}
+          >
+            <div className="relative flex items-center justify-center">
+              <div className="absolute h-16 w-16 rounded-full bg-[#E61C38]/40 blur-xl" />
+              <FileText
+                className="relative h-12 w-12 text-white drop-shadow-[0_0_10px_rgba(230,28,56,0.9)]"
+                strokeWidth={1.25}
+              />
+            </div>
+          </motion.div>
+        </div>
 
         {/* Dissolve particles */}
         {PARTICLES.map((p, k) => (
@@ -269,7 +273,6 @@ export default function AILoadingScreen() {
             }}
           />
         ))}
-        </div>{/* end carton group */}
 
         {/* Typewriter status — centred horizontally, 225px below stage centre */}
         <div
