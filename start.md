@@ -11,17 +11,40 @@ Run both services from the project root:
 cd "C:\Users\happy\Desktop\college\hackathons\POCKET_FM"
 ```
 
-## 1. Configure Gemini
+## 1. Configure OpenAI text generation and Gemini audio
 
 Make sure the root `.env` file contains:
 
 ```env
+OPENAI_API_KEY=your_openai_api_key
 GEMINI_API_KEY=your_gemini_api_key
 ```
 
+Text generation is routed by task complexity:
+
+- `gpt-5.6-sol` handles difficult creative and consistency-heavy work.
+- `gpt-5.6-luna` handles smaller tasks such as casting, evaluation, confirmation,
+  and sound-cue tagging.
+
+Override either model without changing code using `OPENAI_HARD_MODEL` or
+`OPENAI_EASY_MODEL`.
+
+For faster TTS, provide multiple comma-separated keys. Each key receives its own
+rate-limit lane and one line can be rendered per key in parallel:
+
+```env
+GEMINI_API_KEY=your_primary_key
+GEMINI_API_KEYS=key_1,key_2,key_3
+TTS_PARALLEL_WORKERS=3
+```
+
+`TTS_PARALLEL_WORKERS` should normally be no greater than the total number of unique
+keys. The application automatically removes duplicate keys.
+
 The project uses:
 
-- `gemini-3.1-flash-lite` for story generation and transcription
+- `gpt-5.6-sol` and `gpt-5.6-luna` for routed story text generation
+- `gemini-3.1-flash-lite` for microphone transcription
 - `gemini-3.1-flash-tts-preview` for voices
 
 ## 2. Start the backend
@@ -85,9 +108,10 @@ current step:
 script → voices → sound → mix
 ```
 
-Gemini’s free-tier TTS quota is rate-limited, so an episode may take several minutes.
-Generate one episode at a time and avoid repeatedly clicking the Generate button while a
-job is already running.
+Gemini’s free-tier TTS quota is rate-limited per key or project. With multiple independent
+keys, episode lines are distributed across the key pool and rendered concurrently. A
+single key is still throttled safely, and retryable quota errors rotate to another key.
+Avoid repeatedly clicking Generate while a job is already running.
 
 ## 6. Production build check
 

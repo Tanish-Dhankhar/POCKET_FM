@@ -17,6 +17,9 @@ Layout (everything the frontend reads/writes lives here):
     │   └── characters/
     │       ├── narrator.json        # only when a narrator is used
     │       └── <character-slug>.json
+    ├── images/                      # optional artwork (see app/image_service.py)
+    │   ├── thumbnail.png
+    │   └── characters/<character-slug>.png
     └── episodes/
         └── ep01/
             ├── outline.json         # title, summary, events, emotion, cliffhanger
@@ -39,13 +42,20 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from . import config
+from . import databricks_store
 
 _SLUG = re.compile(r"[^a-z0-9]+")
+
+# Fields the loaders derive from the filesystem and attach for the UI. They are
+# stripped again on write so they never end up inside a stored record.
+_COMPUTED_CHARACTER_FIELDS = {"has_image"}
+
 
 
 # --------------------------------------------------------------------------- #
@@ -84,13 +94,34 @@ def lines_dir(series_id: str, number: int) -> Path:
     return episode_dir(series_id, number) / "lines"
 
 
+def images_dir(series_id: str) -> Path:
+    return series_dir(series_id) / "images"
+
+
+def character_images_dir(series_id: str) -> Path:
+    return images_dir(series_id) / "characters"
+
+
+def thumbnail_path(series_id: str) -> Path:
+    return images_dir(series_id) / "thumbnail.png"
+
+
+def character_image_path(series_id: str, key: str) -> Path:
+    return character_images_dir(series_id) / f"{key}.png"
+
+
+def character_key(character: dict) -> str:
+    """The file stem a character is stored under ('narrator', or its slug)."""
+    return "narrator" if character.get("is_narrator") else slug(character.get("name", ""))
+
+
 # --------------------------------------------------------------------------- #
 # primitive read / write
 # --------------------------------------------------------------------------- #
 def write_json(path: Path, data: Any) -> Path:
     """Atomically write JSON (temp file + replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str),
                    encoding="utf-8")
     tmp.replace(path)
@@ -108,7 +139,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 def write_text(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(text or "", encoding="utf-8")
     tmp.replace(path)
     return path
@@ -186,9 +217,13 @@ def save_blueprint(series_id: str, blueprint: dict, *, meta: dict | None = None)
 
 def save_character(series_id: str, character: dict) -> Path:
     """One JSON per character; the narrator is always narrator.json."""
-    name = character.get("name", "")
-    key = "narrator" if character.get("is_narrator") else slug(name)
-    return write_json(characters_dir(series_id) / f"{key}.json", character)
+    key = character_key(character)
+    # `has_image` is derived at read time; drop it so a load -> save round trip
+    # (e.g. save_voice_cast) can't bake a stale flag into the file.
+    record = {k: v for k, v in character.items() if k not in _COMPUTED_CHARACTER_FIELDS}
+    path = write_json(characters_dir(series_id) / f"{key}.json", record)
+    databricks_store.sync_character(series_id, key, record)
+    return path
 
 
 def load_characters(series_id: str) -> list[dict]:
@@ -197,7 +232,12 @@ def load_characters(series_id: str) -> list[dict]:
         return []
     # narrator first, then alphabetical — stable order for the UI
     files = sorted(d.glob("*.json"), key=lambda p: (p.stem != "narrator", p.stem))
-    return [c for c in (read_json(f) for f in files) if c]
+    characters = [c for c in (read_json(f) for f in files) if c]
+    for ch in characters:
+        # Computed at read time, never persisted — the file on disk is the truth.
+        ch["has_image"] = character_image_path(series_id, character_key(ch)).exists()
+    return characters
+
 
 
 def load_blueprint(series_id: str) -> dict[str, Any]:
@@ -239,19 +279,27 @@ def load_voice_cast(series_id: str) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 def save_episode_outline(series_id: str, outline: dict) -> Path:
     num = int(outline.get("number", 0))
-    return write_json(episode_dir(series_id, num) / "outline.json", outline)
+    path = write_json(episode_dir(series_id, num) / "outline.json", outline)
+    databricks_store.sync_episode_outline(series_id, num, outline)
+    return path
 
 
 def save_episode_script(series_id: str, number: int, lines: list[dict]) -> Path:
-    return write_json(episode_dir(series_id, number) / "script.json", lines)
+    path = write_json(episode_dir(series_id, number) / "script.json", lines)
+    databricks_store.sync_episode_script(series_id, number, lines)
+    return path
 
 
 def save_episode_sound_plan(series_id: str, number: int, plan: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+    path = write_json(episode_dir(series_id, number) / "sound_plan.json", plan)
+    databricks_store.sync_episode_sound_plan(series_id, number, plan)
+    return path
 
 
 def save_episode_audio(series_id: str, number: int, manifest: dict) -> Path:
-    return write_json(episode_dir(series_id, number) / "audio.json", manifest)
+    path = write_json(episode_dir(series_id, number) / "audio.json", manifest)
+    databricks_store.sync_episode_audio(series_id, number, manifest)
+    return path
 
 
 def load_episode(series_id: str, number: int) -> dict[str, Any]:
@@ -332,6 +380,7 @@ def save_index(series_id: str, **fields: Any) -> dict:
     card["updated_at"] = _now()
     card.setdefault("created_at", card["updated_at"])
     write_json(path, card)
+    databricks_store.sync_series(card)
     return card
 
 
@@ -342,7 +391,11 @@ def load_index(series_id: str) -> dict:
     card["generated_count"] = sum(
         1 for n in nums if episode_status(series_id, n) == "ready"
     )
+    # Computed at read time. save_index re-reads the raw file, so this never
+    # round-trips back into series.json.
+    card["has_thumbnail"] = thumbnail_path(series_id).exists()
     return card
+
 
 
 def list_series() -> list[dict]:

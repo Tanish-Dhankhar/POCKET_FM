@@ -527,3 +527,6 @@ The basic frontend is now implemented in `frontend/` using React + JavaScript.
   all-episode script node. The Generate button is the only trigger for script + TTS.
 - **Verified:** `npm run build` succeeds and the Python backend suite passes. The Vite
   app and FastAPI health endpoint both respond locally.
+- **Multi-key TTS:** `GEMINI_API_KEYS` supplies a de-duplicated key pool. Every key has
+  its own client, lock, and throttle clock; episode lines render concurrently through a
+  bounded worker pool and are reassembled in original script order.

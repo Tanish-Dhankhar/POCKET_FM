@@ -5,11 +5,13 @@ These use real WAVs through pydub, so they verify actual sample data, not mocks.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import pytest
 from pydub import AudioSegment
 
 from app import assets, audio_engine, config, schemas
+from app.nodes import audio as audio_nodes
 from app.nodes.audio import _enforce, _voice_for
 
 from conftest import write_tone_wav
@@ -210,3 +212,49 @@ def test_voice_for_uncast_character_is_stable_across_processes():
                              capture_output=True, text=True, check=True)
         runs.add(out.stdout.strip())
     assert len(runs) == 1, f"voice fallback is not deterministic across runs: {runs}"
+
+
+def test_parallel_render_preserves_script_order(tmp_path, monkeypatch):
+    completed = []
+
+    def fake_render(text, voice, out, cache_dir=None):
+        # Finish in reverse order to prove concatenation is not completion-ordered.
+        time.sleep({"first": 0.06, "second": 0.03, "third": 0.0}[text])
+        out = Path(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"wav")
+        completed.append(text)
+        return out
+
+    captured = []
+
+    class Track:
+        def __len__(self):
+            return 300
+
+    def fake_concat(paths):
+        captured.extend(Path(path).name for path in paths)
+        return Track(), [0, 100, 200]
+
+    monkeypatch.setattr(audio_nodes, "render_line", fake_render)
+    monkeypatch.setattr(audio_nodes.audio_engine, "concat_lines", fake_concat)
+    monkeypatch.setattr(audio_nodes.audio_engine, "export", lambda track, path: None)
+    monkeypatch.setattr(audio_nodes.store, "series_dir", lambda sid: tmp_path)
+    monkeypatch.setattr(audio_nodes.store, "lines_dir", lambda sid, n: tmp_path / "lines")
+    monkeypatch.setattr(audio_nodes.store, "episode_dir", lambda sid, n: tmp_path / "episode")
+    monkeypatch.setattr(audio_nodes.store, "save_episode_audio", lambda *args: None)
+    monkeypatch.setattr(audio_nodes.config, "TTS_PARALLEL_WORKERS", 3)
+
+    state = {
+        "series_id": "parallel",
+        "voice_cast": {},
+        "scripts": {"1": [
+            {"speaker": "A", "text": "first"},
+            {"speaker": "B", "text": "second"},
+            {"speaker": "C", "text": "third"},
+        ]},
+    }
+    audio_nodes.render_episode_audio(state, 1)
+
+    assert completed != ["first", "second", "third"]
+    assert [name[:4] for name in captured] == ["0000", "0001", "0002"]

@@ -7,21 +7,24 @@ reaches `deliver`. Continuation adds a new plain-text plot and re-runs.
 from __future__ import annotations
 
 import uuid
+import logging
+import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from langgraph.types import Command
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import config, store
+from . import config, jobs, store
 from .api_store import router as store_router
 from .graph import GRAPH
 from .state import new_state
 
 app = FastAPI(title="AI Creator Copilot", version="0.1.0")
+_LOG = logging.getLogger(__name__)
 
 # The React frontend runs on its own dev-server origin, so the browser sends a
 # preflight before every POST. Without this the whole API is unreachable from it.
@@ -38,11 +41,29 @@ app.add_middleware(
 app.include_router(store_router)
 
 
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    """Attach a correlation id and timing without logging creator content."""
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        _LOG.exception("request_failed id=%s method=%s path=%s", request_id,
+                       request.method, request.url.path)
+        raise
+    response.headers["X-Request-ID"] = request_id
+    _LOG.info("request_completed id=%s method=%s path=%s status=%s duration_ms=%.1f",
+              request_id, request.method, request.url.path, response.status_code,
+              (time.perf_counter() - started) * 1000)
+    return response
+
+
 # --------------------------------------------------------------------------- #
 # request models
 # --------------------------------------------------------------------------- #
 class NewSeries(BaseModel):
-    idea: str
+    idea: str = Field(min_length=1, max_length=config.MAX_IDEA_CHARS)
     title: str | None = None
     transcript: str | None = None   # set when the idea came from a recording
 
@@ -54,7 +75,7 @@ class Command_(BaseModel):
 
 
 class ContinuePlot(BaseModel):
-    plot: str
+    plot: str = Field(min_length=1, max_length=config.MAX_IDEA_CHARS)
 
 
 # --------------------------------------------------------------------------- #
@@ -189,4 +210,13 @@ def get_episode_audio(series_id: str, number: int) -> FileResponse:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "text_model": config.TEXT_MODEL, "tts_model": config.TTS_MODEL}
+    return {
+        "ok": True,
+        "text_models": {
+            "hard": config.TEXT_MODEL_HARD,
+            "easy": config.TEXT_MODEL_EASY,
+        },
+        "transcription_model": config.TRANSCRIPTION_MODEL,
+        "tts_model": config.TTS_MODEL,
+        "jobs": jobs.summary(),
+    }

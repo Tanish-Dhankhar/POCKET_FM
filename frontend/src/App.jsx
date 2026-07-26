@@ -6,6 +6,7 @@ import IdeaWizard from './pages/IdeaWizard'
 import Building from './pages/Building'
 import Ideaboard from './pages/Ideaboard'
 import Episode from './pages/Episode'
+import Refining from './pages/Refining'
 
 const page = {
   initial: { opacity: 0, y: 8 },
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/new/mic" element={<Frame><IdeaWizard mode="mic" /></Frame>} />
         <Route path="/new/building" element={<Frame><Building /></Frame>} />
         <Route path="/series/:id" element={<Frame><Ideaboard /></Frame>} />
+        <Route path="/series/:id/refining" element={<Frame><Refining /></Frame>} />
         <Route path="/series/:id/episodes/:number" element={<Frame><Episode /></Frame>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
