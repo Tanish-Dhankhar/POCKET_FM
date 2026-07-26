@@ -7,12 +7,13 @@ atomic de-duplication, cancellation, and a stable pollable job contract.
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 import logging
 import threading
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from . import config
 
@@ -29,9 +30,27 @@ _LOG = logging.getLogger(__name__)
 # Keep finished jobs around so a slow poller can still read the result.
 _MAX_JOBS = config.JOB_MAX_RETAINED
 
+# Story work that runs inside a request instead of as a background job (the
+# wizard drives the LangGraph synchronously). Counted against the same budget so
+# the cap means "5 stories in production", not "5 of each kind".
+_SYNC_STORY_SLOTS = 0
+
+# Sent to the client on 429 so the UI can tell "studio is full" apart from a
+# provider rate limit and show the right message.
+CAPACITY_CODE = "story_capacity"
+
 
 class QueueFullError(RuntimeError):
     """Raised when the local worker queue has reached its configured capacity."""
+
+
+def capacity_detail(exc: QueueFullError) -> dict[str, Any]:
+    """Machine-readable 429 body for a rejected story request."""
+    return {
+        "code": CAPACITY_CODE,
+        "message": str(exc),
+        "limit": config.STORY_MAX_CONCURRENCY,
+    }
 
 
 def _now() -> str:
@@ -90,6 +109,38 @@ def _active_story_count() -> int:
     )
 
 
+def _story_load() -> int:
+    """Total story work in flight: background jobs plus synchronous requests."""
+    return _active_story_count() + _SYNC_STORY_SLOTS
+
+
+def _at_capacity() -> QueueFullError:
+    return QueueFullError(
+        f"at most {config.STORY_MAX_CONCURRENCY} stories can be generated at once; "
+        "please retry shortly"
+    )
+
+
+@contextmanager
+def story_slot() -> Iterator[None]:
+    """Hold one story slot for the duration of a synchronous pipeline request.
+
+    The wizard runs the LangGraph inside the request, so those creators are
+    invisible to the job table. Reserving a slot here is what makes a 6th
+    simultaneous creator get a 429 instead of silently piling onto the provider.
+    """
+    global _SYNC_STORY_SLOTS
+    with _LOCK:
+        if _story_load() >= config.STORY_MAX_CONCURRENCY:
+            raise _at_capacity()
+        _SYNC_STORY_SLOTS += 1
+    try:
+        yield
+    finally:
+        with _LOCK:
+            _SYNC_STORY_SLOTS -= 1
+
+
 def _clear_active_key(job: dict[str, Any]) -> None:
     key = job.get("dedupe_key")
     if key and _ACTIVE_KEYS.get(key) == job["id"]:
@@ -110,13 +161,10 @@ def start_or_rejoin(kind: str, fn: Callable[[JobHandle], Any], *,
         if _active_count() >= config.JOB_MAX_QUEUE:
             raise QueueFullError("generation queue is full; please retry shortly")
 
-        # At most STORY_MAX_CONCURRENCY story jobs may run at once. Rejoins
-        # above already returned, so this only blocks genuinely new work.
-        if kind in config.STORY_JOB_KINDS and _active_story_count() >= config.STORY_MAX_CONCURRENCY:
-            raise QueueFullError(
-                f"at most {config.STORY_MAX_CONCURRENCY} stories can be generated at once; "
-                "please retry shortly"
-            )
+        # At most STORY_MAX_CONCURRENCY stories may be in production at once.
+        # Rejoins above already returned, so this only blocks genuinely new work.
+        if kind in config.STORY_JOB_KINDS and _story_load() >= config.STORY_MAX_CONCURRENCY:
+            raise _at_capacity()
 
         job_id = uuid.uuid4().hex[:12]
         _JOBS[job_id] = {
@@ -202,7 +250,7 @@ def summary() -> dict[str, int]:
         return {
             "queued": sum(j["state"] == "queued" for j in _JOBS.values()),
             "running": sum(j["state"] == "running" for j in _JOBS.values()),
-            "story_active": _active_story_count(),
+            "story_active": _story_load(),
             "retained": len(_JOBS),
             "max_concurrency": config.JOB_MAX_CONCURRENCY,
             "max_story_concurrency": config.STORY_MAX_CONCURRENCY,

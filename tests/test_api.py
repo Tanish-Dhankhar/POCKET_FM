@@ -213,6 +213,83 @@ def test_continue_requires_a_plot(client):
     assert client.post(f"/series/{sid}/continue", json={}).status_code == 422
 
 
+# --------------------------------------------------------------------------- #
+# capacity
+# --------------------------------------------------------------------------- #
+def test_a_creator_over_the_limit_gets_a_429_the_ui_can_recognise(client, monkeypatch):
+    """With every story slot held, a new creator is turned away, not queued."""
+    from app import jobs
+
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+    with jobs.story_slot():
+        r = client.post("/series", json={"idea": "A nurse, a ghost, three nights."})
+
+    assert r.status_code == 429
+    detail = r.json()["detail"]
+    assert detail["code"] == jobs.CAPACITY_CODE
+    assert detail["limit"] == 1
+    assert "1 stories can be generated at once" in detail["message"]
+    assert r.headers["Retry-After"] == "30"
+
+
+def test_capacity_is_released_once_the_request_finishes(client, monkeypatch):
+    """A rejected creator succeeds on retry — the slot is not leaked."""
+    from app import jobs
+
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+    with jobs.story_slot():
+        assert client.post("/series", json={"idea": "A nurse and a ghost."}).status_code == 429
+
+    assert _create(client)["status"] == "awaiting_review"
+    assert jobs.summary()["story_active"] == 0
+
+
+def test_confirm_card_generation_is_capped_but_the_cached_draft_is_not(client, monkeypatch):
+    """Only the branch that actually calls the model consumes a story slot."""
+    from app import jobs, store
+
+    sid = _create(client)["series_id"]
+    (store.input_dir(sid) / "confirmation_draft.json").unlink(missing_ok=True)
+
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+    with jobs.story_slot():
+        r = client.post(f"/studio/series/{sid}/confirm-card")
+        assert r.status_code == 429
+        assert r.json()["detail"]["code"] == jobs.CAPACITY_CODE
+
+    assert client.post(f"/studio/series/{sid}/confirm-card").status_code == 200
+
+    # The draft is now cached; serving it does no AI work, so no slot is needed.
+    with jobs.story_slot():
+        assert client.post(f"/studio/series/{sid}/confirm-card").status_code == 200
+
+
+def test_transcription_is_turned_away_at_capacity(client, monkeypatch):
+    from app import jobs
+
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+    with jobs.story_slot():
+        r = client.post("/studio/transcribe",
+                        files={"file": ("idea.webm", b"not-really-audio", "audio/webm")})
+
+    assert r.status_code == 429
+    assert r.json()["detail"]["code"] == jobs.CAPACITY_CODE
+
+
+def test_voice_sample_rendering_is_turned_away_at_capacity(client, monkeypatch, tmp_path):
+    """An uncached voice preview is a TTS call and respects the budget."""
+    from app import jobs
+
+    monkeypatch.setattr(config, "ASSETS_DIR", tmp_path)  # guarantee a cache miss
+    monkeypatch.setattr(config, "STORY_MAX_CONCURRENCY", 1)
+    voice = next(iter(config.VOICES))
+    with jobs.story_slot():
+        r = client.get(f"/studio/voices/{voice}/sample")
+
+    assert r.status_code == 429
+    assert r.json()["detail"]["code"] == jobs.CAPACITY_CODE
+
+
 def test_cors_allows_a_browser_frontend(client):
     """The React frontend runs on a different origin and must be able to call this."""
     r = client.options("/series", headers={
