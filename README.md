@@ -19,9 +19,11 @@
 
 ## Demo
 
-[![Watch the demo](assets/readme/team-photo.jpg)](assets/readme/project-demo.mp4)
 
-> Click the image above to watch the full project demo, or [download it directly](assets/readme/project-demo.mp4).
+
+https://github.com/user-attachments/assets/5425ea71-cd73-4594-88bb-44a5d4065a7f
+
+
 
 ---
 
@@ -341,8 +343,6 @@ POCKET_FM/
 <div align="center">
 
 Built for the **Zero to One Hackathon**
-
-Powered by **OpenAI** · **Google Gemini** · **LangGraph** · **pydub**
 
 </div>
 
